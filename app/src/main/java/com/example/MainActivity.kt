@@ -124,23 +124,8 @@ class MainActivity : ComponentActivity() {
                                         revealedGameIds = revealedGameIds,
                                         onSelectGame = { game ->
                                             viewModel.selectGameForSquares(game)
-                                            // Match and play channel if available
-                                            val matched = channels.find { ch ->
-                                                ch.name.contains(game.awayTeam.abbreviation, ignoreCase = true) ||
-                                                ch.name.contains(game.homeTeam.abbreviation, ignoreCase = true)
-                                            }
-                                            if (matched != null) {
-                                                viewModel.setPlayingChannel(matched)
-                                            }
                                         },
                                         onSelectNcaaGame = { ncaaGame ->
-                                            val matched = viewModel.matchChannelForNcaaGame(ncaaGame)
-                                            if (matched != null) {
-                                                viewModel.setPlayingChannel(matched)
-                                            } else {
-                                                val query = "${ncaaGame.awayTeam.displayName} ${ncaaGame.homeTeam.displayName}"
-                                                viewModel.openChannelsWithFilter(query)
-                                            }
                                         },
                                         onSelectNcaaTeam = { teamName ->
                                             viewModel.openChannelsWithFilter(teamName)
@@ -154,7 +139,17 @@ class MainActivity : ComponentActivity() {
                                                 viewModel.setPlayingChannel(channels[nextIdx])
                                             }
                                         },
-                                        onNavigateToSettings = { viewModel.setScreen(4) }
+                                        onNavigateToSettings = { viewModel.setScreen(4) },
+                                        onAddToMultiview = { title, candidates ->
+                                            viewModel.addGameToMultiview(title, candidates)
+                                        },
+                                        onWatchFullScreenChannel = { ch ->
+                                            viewModel.setPlayingChannel(ch)
+                                            viewModel.setFullScreenPlayer(true)
+                                        },
+                                        onFindChannel = { query ->
+                                            viewModel.openChannelsWithFilter(query)
+                                        }
                                     )
 
                                     1 -> MultiviewScreen(
@@ -168,7 +163,8 @@ class MainActivity : ComponentActivity() {
                                         onExpandTile = { ch ->
                                             viewModel.setPlayingChannel(ch)
                                             viewModel.setFullScreenPlayer(true)
-                                        }
+                                        },
+                                        onCycleTileBackup = { viewModel.cycleMultiviewTileToNextCandidate(it) }
                                     )
 
                                     2 -> ChannelsScreen(

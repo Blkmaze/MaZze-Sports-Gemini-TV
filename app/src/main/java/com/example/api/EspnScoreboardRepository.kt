@@ -136,6 +136,9 @@ class EspnScoreboardRepository(
                 val state = typeObj?.optString("state", "pre") ?: "pre"
                 val shortDetail = typeObj?.optString("shortDetail", "") ?: ""
 
+                // Extract broadcast network
+                val network = extractNetwork(competition)
+
                 val game = Game(
                     id = eventId.ifEmpty { "${target.league}_$i" },
                     sport = target.sport,
@@ -148,7 +151,8 @@ class EspnScoreboardRepository(
                     awayScore = awayScore,
                     state = state,
                     statusDetail = shortDetail,
-                    startTime = dateStr
+                    startTime = dateStr,
+                    network = network
                 )
                 list.add(game)
             }
@@ -371,24 +375,7 @@ class EspnScoreboardRepository(
                         }
 
                         // Extract TV network
-                        var network = ""
-                        val broadcasts = comp.optJSONArray("broadcasts")
-                        if (broadcasts != null) {
-                            for (bIdx in 0 until broadcasts.length()) {
-                                val b = broadcasts.optJSONObject(bIdx) ?: continue
-                                val media = b.optJSONObject("media")
-                                val shortName = media?.optString("shortName", "") ?: ""
-                                if (shortName.isNotBlank()) {
-                                    network = shortName
-                                    break
-                                }
-                                val names = b.optJSONArray("names")
-                                if (names != null && names.length() > 0) {
-                                    network = names.optString(0, "")
-                                    if (network.isNotBlank()) break
-                                }
-                            }
-                        }
+                        var network = extractNetwork(comp)
                         if (network.isBlank()) {
                             network = if (isSecMatch) "SECN / ESPN" else "TV"
                         }
@@ -468,5 +455,23 @@ class EspnScoreboardRepository(
                 }
             }
         }
+    }
+
+    private fun extractNetwork(comp: org.json.JSONObject): String {
+        val arrays = listOfNotNull(comp.optJSONArray("broadcasts"), comp.optJSONArray("geoBroadcasts"))
+        for (arr in arrays) {
+            for (bIdx in 0 until arr.length()) {
+                val b = arr.optJSONObject(bIdx) ?: continue
+                val media = b.optJSONObject("media")
+                val shortName = media?.optString("shortName", "") ?: ""
+                if (shortName.isNotBlank()) return shortName
+                val names = b.optJSONArray("names")
+                if (names != null && names.length() > 0) {
+                    val n = names.optString(0, "")
+                    if (n.isNotBlank()) return n
+                }
+            }
+        }
+        return ""
     }
 }

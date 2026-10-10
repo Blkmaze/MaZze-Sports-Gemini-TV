@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.api.ChannelMatchingHelper
 import com.example.api.EspnScoreboardRepository
 import com.example.api.PlaylistRepository
 import com.example.api.UpdaterRepository
@@ -62,7 +63,12 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     private val _multiviewGameTitles = MutableStateFlow<List<String?>>(listOf(null, null, null, null))
     val multiviewGameTitles: StateFlow<List<String?>> = _multiviewGameTitles.asStateFlow()
 
+    // Up to 3 candidate channels per multiview tile for automatic failover/backup rotation
+    private val _multiviewCandidates = MutableStateFlow<List<List<Channel>>>(listOf(emptyList(), emptyList(), emptyList(), emptyList()))
+    val multiviewCandidates: StateFlow<List<List<Channel>>> = _multiviewCandidates.asStateFlow()
+
     private val manualTileIndices = mutableSetOf<Int>()
+    private val tileEvictionQueue = mutableListOf(0, 1, 2, 3) // Tracks oldest to newest tile for FIFO eviction
 
     private val _multiviewSoundIndex = MutableStateFlow(0)
     val multiviewSoundIndex: StateFlow<Int> = _multiviewSoundIndex.asStateFlow()
@@ -140,79 +146,16 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun matchChannelForNcaaGame(game: NcaaGame, excludeIds: Set<String> = emptySet()): Channel? {
-        val currentChannels = _channels.value.filter { it.id !in excludeIds }
-        if (currentChannels.isEmpty()) return null
+        val candidates = ChannelMatchingHelper.findCandidatesForNcaaGame(game, _channels.value, excludeIds, limit = 1)
+        return candidates.firstOrNull()
+    }
 
-        val homeName = game.homeTeam.displayName.lowercase(Locale.ROOT)
-        val awayName = game.awayTeam.displayName.lowercase(Locale.ROOT)
-        val homeAbbr = game.homeTeam.abbreviation.lowercase(Locale.ROOT)
-        val awayAbbr = game.awayTeam.abbreviation.lowercase(Locale.ROOT)
-        val netRaw = game.network.lowercase(Locale.ROOT)
+    fun getCandidatesForNcaaGame(game: NcaaGame, excludeIds: Set<String> = emptySet()): List<Channel> {
+        return ChannelMatchingHelper.findCandidatesForNcaaGame(game, _channels.value, excludeIds, limit = 3)
+    }
 
-        // 1. Try exact team match in playlist
-        currentChannels.find { ch ->
-            val cName = ch.name.lowercase(Locale.ROOT)
-            (homeAbbr.length >= 3 && cName.contains(homeAbbr)) ||
-            (awayAbbr.length >= 3 && cName.contains(awayAbbr)) ||
-            (homeName.length > 3 && cName.contains(homeName)) ||
-            (awayName.length > 3 && cName.contains(awayName))
-        }?.let { return it }
-
-        // 2. Try network match in playlist (e.g. ESPN, ESPN2, SEC Network, ABC, CBS, FOX, NBC)
-        val netKeywords = mutableListOf<String>()
-        if (netRaw.isNotBlank() && netRaw != "tv") {
-            netKeywords.add(netRaw)
-            when {
-                netRaw.contains("sec") -> {
-                    netKeywords.add("sec network")
-                    netKeywords.add("secn")
-                    netKeywords.add("sec")
-                }
-                netRaw.contains("espn2") -> {
-                    netKeywords.add("espn2")
-                    netKeywords.add("espn 2")
-                }
-                netRaw.contains("espnu") -> {
-                    netKeywords.add("espnu")
-                    netKeywords.add("espn u")
-                }
-                netRaw.contains("espn") -> {
-                    netKeywords.add("espn")
-                }
-                netRaw.contains("abc") -> {
-                    netKeywords.add("abc")
-                }
-                netRaw.contains("cbs") -> {
-                    netKeywords.add("cbs")
-                }
-                netRaw.contains("fox") -> {
-                    netKeywords.add("fox")
-                }
-                netRaw.contains("nbc") -> {
-                    netKeywords.add("nbc")
-                }
-                netRaw.contains("fs1") -> {
-                    netKeywords.add("fs1")
-                    netKeywords.add("fox sports 1")
-                }
-            }
-        }
-
-        for (kw in netKeywords) {
-            if (kw.length >= 3) {
-                currentChannels.find { ch ->
-                    ch.name.lowercase(Locale.ROOT).contains(kw)
-                }?.let { return it }
-            }
-        }
-
-        // 3. Try generic CFB / college sports
-        return currentChannels.find { ch ->
-            val cName = ch.name.lowercase(Locale.ROOT)
-            val cGrp = ch.groupTitle.lowercase(Locale.ROOT)
-            cName.contains("college") || cName.contains("ncaa") || cName.contains("acc") ||
-            cName.contains("sec") || cGrp.contains("college") || cGrp.contains("sports")
-        }
+    fun getCandidatesForGame(game: Game, excludeIds: Set<String> = emptySet()): List<Channel> {
+        return ChannelMatchingHelper.findCandidatesForGame(game, _channels.value, excludeIds, limit = 3)
     }
 
     fun setFullScreenPlayer(fullScreen: Boolean) {
@@ -287,18 +230,85 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     fun setMultiviewSlotChannel(slotIndex: Int, channel: Channel) {
         val slots = _multiviewChannels.value.toMutableList()
         val titles = _multiviewGameTitles.value.toMutableList()
+        val candidatesList = _multiviewCandidates.value.toMutableList()
         if (slotIndex in 0..3) {
             slots[slotIndex] = channel
             titles[slotIndex] = null // Clear auto-fill title so channel name is displayed
+            candidatesList[slotIndex] = listOf(channel)
             manualTileIndices.add(slotIndex)
+            tileEvictionQueue.remove(slotIndex)
+            tileEvictionQueue.add(slotIndex)
             _multiviewChannels.value = slots
             _multiviewGameTitles.value = titles
+            _multiviewCandidates.value = candidatesList
         }
+    }
+
+    /**
+     * Adds a game (Game or NcaaGame) to the first empty multiview tile
+     * (or the oldest tile if all four are occupied), stores candidates, title and channel.
+     * Returns the 1-based tile index (1..4) where it was assigned.
+     */
+    fun addGameToMultiview(
+        gameTitle: String,
+        candidateChannels: List<Channel>
+    ): Int {
+        val slots = _multiviewChannels.value.toMutableList()
+        val titles = _multiviewGameTitles.value.toMutableList()
+        val candidatesList = _multiviewCandidates.value.toMutableList()
+
+        // 1. Find first empty slot (null channel)
+        var targetIndex = slots.indexOfFirst { it == null }
+
+        // 2. If all 4 are occupied, pick the oldest tile from tileEvictionQueue
+        if (targetIndex !in 0..3) {
+            targetIndex = tileEvictionQueue.firstOrNull() ?: 0
+        }
+
+        val primaryChannel = candidateChannels.firstOrNull()
+
+        slots[targetIndex] = primaryChannel
+        titles[targetIndex] = gameTitle
+        candidatesList[targetIndex] = candidateChannels
+        manualTileIndices.add(targetIndex)
+        tileEvictionQueue.remove(targetIndex)
+        tileEvictionQueue.add(targetIndex)
+
+        _multiviewChannels.value = slots
+        _multiviewGameTitles.value = titles
+        _multiviewCandidates.value = candidatesList
+
+        return targetIndex + 1
+    }
+
+    /**
+     * Cycles a multiview tile to its next backup/candidate channel if current fails or stalls.
+     * Returns true if a different candidate channel was selected.
+     */
+    fun cycleMultiviewTileToNextCandidate(tileIndex: Int): Boolean {
+        if (tileIndex !in 0..3) return false
+        val currentChannel = _multiviewChannels.value.getOrNull(tileIndex)
+        val candidates = _multiviewCandidates.value.getOrNull(tileIndex) ?: emptyList()
+        if (candidates.size <= 1) return false
+
+        val currentIdx = candidates.indexOfFirst { it.id == currentChannel?.id }
+        val nextIdx = if (currentIdx >= 0) (currentIdx + 1) % candidates.size else 0
+        val nextChannel = candidates[nextIdx]
+
+        if (nextChannel.id != currentChannel?.id) {
+            val slots = _multiviewChannels.value.toMutableList()
+            slots[tileIndex] = nextChannel
+            _multiviewChannels.value = slots
+            return true
+        }
+        return false
     }
 
     fun autoFillMultiviewTop20(forceAll: Boolean = false) {
         if (forceAll) {
             manualTileIndices.clear()
+            tileEvictionQueue.clear()
+            tileEvictionQueue.addAll(listOf(0, 1, 2, 3))
         }
         val allChannels = _channels.value
         if (allChannels.isEmpty()) return
@@ -328,6 +338,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
 
         val currentSlots = _multiviewChannels.value.toMutableList()
         val currentTitles = _multiviewGameTitles.value.toMutableList()
+        val currentCandidates = _multiviewCandidates.value.toMutableList()
 
         val assignedChannelIds = mutableSetOf<String>()
         // If not forcing all, preserve channels of manual slots
@@ -337,15 +348,33 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        // Match games to available channels
-        val matchedList = mutableListOf<Pair<NcaaGame, Channel>>()
+        // Match NCAA games to available channels and keep up to 3 candidates
+        val matchedList = mutableListOf<Triple<Any, List<Channel>, String>>()
         for (game in candidateGames) {
-            val matched = matchChannelForNcaaGame(game, excludeIds = assignedChannelIds)
-                ?: matchChannelForNcaaGame(game)
-            if (matched != null) {
-                matchedList.add(Pair(game, matched))
-                assignedChannelIds.add(matched.id)
+            val candidates = getCandidatesForNcaaGame(game, excludeIds = assignedChannelIds)
+                .ifEmpty { getCandidatesForNcaaGame(game) }
+            if (candidates.isNotEmpty()) {
+                val awayR = if (game.awayRank != null) "#${game.awayRank} " else ""
+                val homeR = if (game.homeRank != null) "#${game.homeRank} " else ""
+                val title = "${awayR}${game.awayTeam.displayName} vs ${homeR}${game.homeTeam.displayName}"
+                matchedList.add(Triple(game, candidates, title))
+                assignedChannelIds.add(candidates.first().id)
                 if (matchedList.size >= 4) break
+            }
+        }
+
+        // If fewer than 4 matched from NCAA, check live games from _games.value (NFL, MLB, etc.)
+        if (matchedList.size < 4) {
+            val liveGeneralGames = _games.value.filter { it.isLive }
+            for (game in liveGeneralGames) {
+                val candidates = getCandidatesForGame(game, excludeIds = assignedChannelIds)
+                    .ifEmpty { getCandidatesForGame(game) }
+                if (candidates.isNotEmpty()) {
+                    val title = "${game.awayTeam.displayName} vs ${game.homeTeam.displayName}"
+                    matchedList.add(Triple(game, candidates, title))
+                    assignedChannelIds.add(candidates.first().id)
+                    if (matchedList.size >= 4) break
+                }
             }
         }
 
@@ -353,20 +382,21 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         for (i in 0..3) {
             if (forceAll || !manualTileIndices.contains(i)) {
                 if (matchIdx < matchedList.size) {
-                    val (g, ch) = matchedList[matchIdx++]
-                    currentSlots[i] = ch
-                    val awayR = if (g.awayRank != null) "#${g.awayRank} " else ""
-                    val homeR = if (g.homeRank != null) "#${g.homeRank} " else ""
-                    currentTitles[i] = "${awayR}${g.awayTeam.displayName} vs ${homeR}${g.homeTeam.displayName}"
+                    val (_, cands, title) = matchedList[matchIdx++]
+                    currentSlots[i] = cands.firstOrNull()
+                    currentTitles[i] = title
+                    currentCandidates[i] = cands
                 } else if (forceAll && currentSlots[i] == null && i < allChannels.size) {
                     currentSlots[i] = allChannels[i]
                     currentTitles[i] = null
+                    currentCandidates[i] = listOf(allChannels[i])
                 }
             }
         }
 
         _multiviewChannels.value = currentSlots
         _multiviewGameTitles.value = currentTitles
+        _multiviewCandidates.value = currentCandidates
     }
 
     private fun startScoreboardPolling() {

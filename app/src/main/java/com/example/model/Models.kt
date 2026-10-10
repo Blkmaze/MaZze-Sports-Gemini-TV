@@ -21,6 +21,7 @@ data class Game(
     val state: String = "pre", // "in", "pre", "post"
     val statusDetail: String = "",
     val startTime: String = "",
+    val network: String = "",
     val matchedChannel: Channel? = null
 ) {
     val isLive: Boolean get() = state == "in"

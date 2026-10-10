@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,11 +21,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.api.ChannelMatchingHelper
 import com.example.model.Channel
 import com.example.model.Game
 import com.example.model.NcaaFootballData
@@ -32,6 +35,13 @@ import com.example.model.NcaaGame
 import com.example.player.TvStreamPlayer
 import com.example.ui.components.*
 import com.example.ui.theme.*
+
+data class GameActionMenuData(
+    val title: String,
+    val network: String,
+    val candidateChannels: List<Channel>,
+    val searchFilter: String
+)
 
 @Composable
 fun HomeScreen(
@@ -43,15 +53,21 @@ fun HomeScreen(
     lastUpdatedTime: String,
     spoilerFree: Boolean,
     revealedGameIds: Set<String>,
-    onSelectGame: (Game) -> Unit,
-    onSelectNcaaGame: (NcaaGame) -> Unit,
+    onSelectGame: (Game) -> Unit = {},
+    onSelectNcaaGame: (NcaaGame) -> Unit = {},
     onSelectNcaaTeam: (String) -> Unit = {},
     onToggleSpoiler: (String) -> Unit,
     onExpandFullScreen: () -> Unit,
     onNextChannel: () -> Unit = {},
     onNavigateToSettings: () -> Unit,
+    onAddToMultiview: (String, List<Channel>) -> Int = { _, _ -> 1 },
+    onWatchFullScreenChannel: (Channel) -> Unit = {},
+    onFindChannel: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    var selectedGameActionMenu by remember { mutableStateOf<GameActionMenuData?>(null) }
+
     val liveGames = remember(games) { games.filter { it.isLive } }
     val upcomingGames = remember(games) { games.filter { it.isPre } }
     val finalGames = remember(games) { games.filter { it.isFinal } }
@@ -289,7 +305,16 @@ fun HomeScreen(
                                 spoilerFree = spoilerFree,
                                 isSpoilerRevealed = revealedGameIds.contains(game.id),
                                 onRevealToggle = { onToggleSpoiler(game.id) },
-                                onClick = { onSelectGame(game) }
+                                onClick = {
+                                    onSelectGame(game)
+                                    val candidates = ChannelMatchingHelper.findCandidatesForGame(game, channels, limit = 3)
+                                    selectedGameActionMenu = GameActionMenuData(
+                                        title = "${game.awayTeam.displayName} vs ${game.homeTeam.displayName}",
+                                        network = game.network,
+                                        candidateChannels = candidates,
+                                        searchFilter = "${game.awayTeam.displayName} ${game.homeTeam.displayName}"
+                                    )
+                                }
                             )
                         }
                     }
@@ -392,7 +417,19 @@ fun HomeScreen(
                         ncaaFootballData.games.forEach { ncaaGame ->
                             NcaaGameRow(
                                 game = ncaaGame,
-                                onClick = { onSelectNcaaGame(ncaaGame) }
+                                onClick = {
+                                    onSelectNcaaGame(ncaaGame)
+                                    val awayR = if (ncaaGame.awayRank != null) "#${ncaaGame.awayRank} " else ""
+                                    val homeR = if (ncaaGame.homeRank != null) "#${ncaaGame.homeRank} " else ""
+                                    val title = "${awayR}${ncaaGame.awayTeam.displayName} vs ${homeR}${ncaaGame.homeTeam.displayName}"
+                                    val candidates = ChannelMatchingHelper.findCandidatesForNcaaGame(ncaaGame, channels, limit = 3)
+                                    selectedGameActionMenu = GameActionMenuData(
+                                        title = title,
+                                        network = ncaaGame.network,
+                                        candidateChannels = candidates,
+                                        searchFilter = "${ncaaGame.awayTeam.displayName} ${ncaaGame.homeTeam.displayName}"
+                                    )
+                                }
                             )
                         }
                     }
@@ -422,13 +459,112 @@ fun HomeScreen(
                         remainingGames.forEach { game ->
                             UpNextGameRow(
                                 game = game,
-                                onClick = { onSelectGame(game) }
+                                onClick = {
+                                    onSelectGame(game)
+                                    val candidates = ChannelMatchingHelper.findCandidatesForGame(game, channels, limit = 3)
+                                    selectedGameActionMenu = GameActionMenuData(
+                                        title = "${game.awayTeam.displayName} vs ${game.homeTeam.displayName}",
+                                        network = game.network,
+                                        candidateChannels = candidates,
+                                        searchFilter = "${game.awayTeam.displayName} ${game.homeTeam.displayName}"
+                                    )
+                                }
                             )
                         }
                     }
                 }
             }
         }
+    }
+
+    // Game Action Menu Dialog (Watch Full Screen, Add to Multiview, Find Channel)
+    if (selectedGameActionMenu != null) {
+        val menuData = selectedGameActionMenu!!
+        AlertDialog(
+            onDismissRequest = { selectedGameActionMenu = null },
+            containerColor = TvDarkCard,
+            shape = RoundedCornerShape(16.dp),
+            title = {
+                Column {
+                    Text(
+                        text = menuData.title,
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (menuData.network.isNotBlank() && menuData.network != "TV") "Broadcast: ${menuData.network}" else "Sports Broadcast",
+                        color = TvLimeAccent,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    if (menuData.candidateChannels.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Matched Channel: ${menuData.candidateChannels.first().name}",
+                            color = TvTextSecondary,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Button 1: Watch Full Screen
+                    MultiviewMenuButton(
+                        text = "Watch Full Screen",
+                        icon = Icons.Default.Fullscreen,
+                        autoFocus = true,
+                        onClick = {
+                            val targetChannel = menuData.candidateChannels.firstOrNull()
+                            selectedGameActionMenu = null
+                            if (targetChannel != null) {
+                                onWatchFullScreenChannel(targetChannel)
+                            } else {
+                                Toast.makeText(context, "No channel found - searching channels", Toast.LENGTH_SHORT).show()
+                                onFindChannel(menuData.searchFilter)
+                            }
+                        }
+                    )
+
+                    // Button 2: Add to Multiview
+                    MultiviewMenuButton(
+                        text = "Add to Multiview",
+                        icon = Icons.Default.Dashboard,
+                        onClick = {
+                            val candidates = menuData.candidateChannels
+                            val tileIndex = onAddToMultiview(menuData.title, candidates)
+                            Toast.makeText(context, "Added to Multiview tile $tileIndex", Toast.LENGTH_SHORT).show()
+                            selectedGameActionMenu = null
+                        }
+                    )
+
+                    // Button 3: Find Channel
+                    MultiviewMenuButton(
+                        text = "Find Channel",
+                        icon = Icons.Default.Search,
+                        onClick = {
+                            selectedGameActionMenu = null
+                            onFindChannel(menuData.searchFilter)
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TvFocusButton(
+                    text = "Close",
+                    onClick = { selectedGameActionMenu = null }
+                )
+            }
+        )
     }
 }
 

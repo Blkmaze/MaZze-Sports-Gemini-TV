@@ -227,33 +227,7 @@ class PlaylistRepository(
     }
 
     fun matchChannelForGame(game: Game, channels: List<Channel>): Channel? {
-        if (channels.isEmpty()) return null
-
-        val homeName = game.homeTeam.displayName.lowercase(Locale.ROOT)
-        val homeAbbr = game.homeTeam.abbreviation.lowercase(Locale.ROOT)
-        val awayName = game.awayTeam.displayName.lowercase(Locale.ROOT)
-        val awayAbbr = game.awayTeam.abbreviation.lowercase(Locale.ROOT)
-        val league = game.league.lowercase(Locale.ROOT)
-
-        // 1. Try exact team match
-        channels.find { ch ->
-            val chName = ch.name.lowercase(Locale.ROOT)
-            (homeAbbr.length >= 3 && chName.contains(homeAbbr)) ||
-            (awayAbbr.length >= 3 && chName.contains(awayAbbr)) ||
-            homeName.split(" ").any { part -> part.length > 3 && chName.contains(part) } ||
-            awayName.split(" ").any { part -> part.length > 3 && chName.contains(part) }
-        }?.let { return it }
-
-        // 2. Try league match (e.g., "NFL Network", "ESPN", "NBA TV")
-        channels.find { ch ->
-            val chName = ch.name.lowercase(Locale.ROOT)
-            chName.contains(league) || (league == "nfl" && chName.contains("football")) ||
-            (league == "nba" && chName.contains("basketball")) ||
-            (league == "epl" && (chName.contains("premier") || chName.contains("soccer")))
-        }?.let { return it }
-
-        // Fallback to first channel
-        return channels.firstOrNull()
+        return ChannelMatchingHelper.findCandidatesForGame(game, channels, limit = 1).firstOrNull()
     }
 
     /**
