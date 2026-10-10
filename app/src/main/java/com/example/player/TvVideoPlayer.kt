@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -71,6 +72,7 @@ fun TvStreamPlayer(
 
         ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build().apply {
                 repeatMode = Player.REPEAT_MODE_OFF
                 playWhenReady = true
@@ -183,6 +185,7 @@ fun TvStreamPlayer(
                     PlayerView(ctx).apply {
                         player = exoPlayer
                         useController = false
+                        keepScreenOn = true
                         layoutParams = FrameLayout.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT

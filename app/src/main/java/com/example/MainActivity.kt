@@ -1,6 +1,7 @@
 package com.example
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -25,6 +26,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
 
         setContent {
@@ -40,6 +42,7 @@ class MainActivity : ComponentActivity() {
                 val revealedGameIds by viewModel.revealedGameIds.collectAsStateWithLifecycle()
 
                 val multiviewChannels by viewModel.multiviewChannels.collectAsStateWithLifecycle()
+                val multiviewGameTitles by viewModel.multiviewGameTitles.collectAsStateWithLifecycle()
                 val multiviewSoundIndex by viewModel.multiviewSoundIndex.collectAsStateWithLifecycle()
 
                 val squaresSelectedGame by viewModel.squaresSelectedGame.collectAsStateWithLifecycle()
@@ -157,9 +160,11 @@ class MainActivity : ComponentActivity() {
                                     1 -> MultiviewScreen(
                                         channels = channels,
                                         multiviewChannels = multiviewChannels,
+                                        multiviewGameTitles = multiviewGameTitles,
                                         activeSoundIndex = multiviewSoundIndex,
                                         onSetSoundIndex = { viewModel.setMultiviewSound(it) },
                                         onSlotChannelChange = { slot, ch -> viewModel.setMultiviewSlotChannel(slot, ch) },
+                                        onAutoFillTop20 = { viewModel.autoFillMultiviewTop20(forceAll = true) },
                                         onExpandTile = { ch ->
                                             viewModel.setPlayingChannel(ch)
                                             viewModel.setFullScreenPlayer(true)
