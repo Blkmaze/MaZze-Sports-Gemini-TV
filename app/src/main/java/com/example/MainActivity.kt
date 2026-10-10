@@ -237,6 +237,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    }
+
     override fun onStop() {
         super.onStop()
         // Activity stopped: all active players are released via lifecycle observers
