@@ -72,7 +72,8 @@ fun MultiviewScreen(
 
     LaunchedEffect(Unit) {
         val initialFocusIndex = if (activeSoundIndex in 0..3) activeSoundIndex else 0
-        tileFocusRequesters.getOrNull(initialFocusIndex)?.requestFocus()
+        kotlinx.coroutines.delay(300)
+        try { tileFocusRequesters.getOrNull(initialFocusIndex)?.requestFocus() } catch (e: Exception) { }
     }
 
     Column(
@@ -813,7 +814,8 @@ fun MultiviewMenuButton(
 
     if (autoFocus) {
         LaunchedEffect(Unit) {
-            focusRequester.requestFocus()
+            kotlinx.coroutines.delay(300)
+        try { focusRequester.requestFocus() } catch (e: Exception) { }
         }
     }
 
