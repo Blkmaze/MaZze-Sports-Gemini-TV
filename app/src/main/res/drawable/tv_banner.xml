@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <!-- Background gradient -->
+    <path android:pathData="M0,0h320v180h-320z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="320"
+                android:endY="180"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#0d0d10" />
+                <item android:offset="0.6" android:color="#14141d" />
+                <item android:offset="1.0" android:color="#1e1826" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Stadium floodlight arcs -->
+    <path
+        android:pathData="M-20,180 Q160,-20 340,180"
+        android:strokeWidth="1.5"
+        android:strokeColor="#22ff7a1a"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M20,180 Q160,20 300,180"
+        android:strokeWidth="1.5"
+        android:strokeColor="#18a3e635"
+        android:fillColor="#00000000" />
+
+    <!-- TV Screen Icon on Left -->
+    <path
+        android:pathData="M35,55 L85,55 A5,5 0 0,1 90,60 L90,110 A5,5 0 0,1 85,115 L35,115 A5,5 0 0,1 30,110 L30,60 A5,5 0 0,1 35,55 Z"
+        android:strokeWidth="3.5"
+        android:strokeColor="#ff7a1a"
+        android:fillColor="#15151f" />
+    <!-- 'M' Inside TV -->
+    <path
+        android:pathData="M40,105 L50,75 L60,93 L70,75 L80,105"
+        android:strokeWidth="4"
+        android:strokeColor="#a3e635"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M52,47 L60,55 L68,47"
+        android:strokeWidth="2.5"
+        android:strokeColor="#ff7a1a"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <!-- Stand -->
+    <path
+        android:pathData="M54,115 L52,125 L68,125 L66,115"
+        android:strokeWidth="2"
+        android:strokeColor="#555566"
+        android:fillColor="#555566" />
+
+    <!-- Decorative Accent Pill / Live Badge -->
+    <path
+        android:pathData="M110,50 L158,50 A6,6 0 0,1 164,56 L164,66 A6,6 0 0,1 158,72 L110,72 A6,6 0 0,1 104,66 L104,56 A6,6 0 0,1 110,50 Z"
+        android:fillColor="#ff7a1a" />
+    <!-- Live dot inside badge -->
+    <path
+        android:pathData="M114,61 A3,3 0 1,1 114,61.01"
+        android:fillColor="#ffffff" />
+
+    <!-- High energy lines on right -->
+    <path
+        android:pathData="M230,45 L290,45"
+        android:strokeWidth="3"
+        android:strokeColor="#ff7a1a"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M250,55 L300,55"
+        android:strokeWidth="2.5"
+        android:strokeColor="#a3e635"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M220,125 L300,125"
+        android:strokeWidth="1.5"
+        android:strokeColor="#44ff7a1a" />
+</vector>

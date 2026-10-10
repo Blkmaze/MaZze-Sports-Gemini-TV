@@ -1,0 +1,6 @@
+{
+  "name": "MaZze Sports TV",
+  "description": "Native Android TV & Fire TV sports hub with live scores, multiview, IPTV channels, and squares.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

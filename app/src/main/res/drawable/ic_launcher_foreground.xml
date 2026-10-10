@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- TV Screen Outline (Safe zone 28 to 80) -->
+    <path
+        android:pathData="M30,30 L78,30 A6,6 0 0,1 84,36 L84,70 A6,6 0 0,1 78,76 L30,76 A6,6 0 0,1 24,70 L24,36 A6,6 0 0,1 30,30 Z"
+        android:strokeWidth="3.5"
+        android:strokeColor="#ff7a1a"
+        android:fillColor="#181822" />
+    <!-- Dynamic 'M' Sports wave -->
+    <path
+        android:pathData="M33,68 L43,40 L54,58 L65,40 L75,68"
+        android:strokeWidth="4"
+        android:strokeColor="#a3e635"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <!-- TV Antennas / Signal broadcast -->
+    <path
+        android:pathData="M44,22 L54,30 L64,22"
+        android:strokeWidth="2.5"
+        android:strokeColor="#ff7a1a"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <!-- Live sports dot -->
+    <path
+        android:pathData="M75,37 A2,2 0 1,1 75,37.01"
+        android:strokeWidth="2.5"
+        android:strokeColor="#ff7a1a"
+        android:fillColor="#ff7a1a" />
+    <!-- Stand -->
+    <path
+        android:pathData="M48,76 L46,84 L62,84 L60,76"
+        android:strokeWidth="2"
+        android:strokeColor="#666677"
+        android:fillColor="#666677" />
+</vector>
