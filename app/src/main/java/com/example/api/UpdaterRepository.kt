@@ -22,7 +22,7 @@ class UpdaterRepository(
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 ) {
-    private val defaultRepo = "willie-mayes/mazze-sports-tv"
+    private val defaultRepo = "Blkmaze/MaZze-Sports-Gemini-TV"
 
     suspend fun checkForUpdates(customRepo: String? = null): UpdateInfo = withContext(Dispatchers.IO) {
         val repo = if (!customRepo.isNullOrBlank()) customRepo.trim() else defaultRepo
