@@ -6,7 +6,7 @@
     android:viewportWidth="320"
     android:viewportHeight="180">
 
-    <!-- Background gradient -->
+    <!-- Dark Background -->
     <path android:pathData="M0,0h320v180h-320z">
         <aapt:attr name="android:fillColor">
             <gradient
@@ -16,13 +16,13 @@
                 android:endY="180"
                 android:type="linear">
                 <item android:offset="0.0" android:color="#0d0d10" />
-                <item android:offset="0.6" android:color="#14141d" />
-                <item android:offset="1.0" android:color="#1e1826" />
+                <item android:offset="0.7" android:color="#14141d" />
+                <item android:offset="1.0" android:color="#1a1a24" />
             </gradient>
         </aapt:attr>
     </path>
 
-    <!-- Stadium floodlight arcs -->
+    <!-- Stadium floodlight accents -->
     <path
         android:pathData="M-20,180 Q160,-20 340,180"
         android:strokeWidth="1.5"
@@ -30,59 +30,159 @@
         android:fillColor="#00000000" />
     <path
         android:pathData="M20,180 Q160,20 300,180"
-        android:strokeWidth="1.5"
+        android:strokeWidth="1.2"
         android:strokeColor="#18a3e635"
         android:fillColor="#00000000" />
 
-    <!-- TV Screen Icon on Left -->
+    <!-- Left Badge Shield -->
     <path
-        android:pathData="M35,55 L85,55 A5,5 0 0,1 90,60 L90,110 A5,5 0 0,1 85,115 L35,115 A5,5 0 0,1 30,110 L30,60 A5,5 0 0,1 35,55 Z"
-        android:strokeWidth="3.5"
+        android:pathData="M32,38 L88,38 A6,6 0 0,1 94,44 L94,136 A6,6 0 0,1 88,142 L32,142 A6,6 0 0,1 26,136 L26,44 A6,6 0 0,1 32,38 Z"
+        android:strokeWidth="2.5"
         android:strokeColor="#ff7a1a"
         android:fillColor="#15151f" />
-    <!-- 'M' Inside TV -->
+
+    <!-- Bold Orange 'M' Mark -->
     <path
-        android:pathData="M40,105 L50,75 L60,93 L70,75 L80,105"
-        android:strokeWidth="4"
+        android:pathData="M36,128 L48,56 L60,94 L72,56 L84,128"
+        android:strokeWidth="7"
+        android:strokeColor="#ff7a1a"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- Accent Lime Chevron inside M -->
+    <path
+        android:pathData="M52,106 L60,118 L68,106"
+        android:strokeWidth="3.5"
         android:strokeColor="#a3e635"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000" />
+
+    <!-- Broadcast Signal / Antenna -->
     <path
-        android:pathData="M52,47 L60,55 L68,47"
+        android:pathData="M50,26 L60,38 L70,26"
         android:strokeWidth="2.5"
         android:strokeColor="#ff7a1a"
         android:strokeLineCap="round"
         android:fillColor="#00000000" />
-    <!-- Stand -->
-    <path
-        android:pathData="M54,115 L52,125 L68,125 L66,115"
-        android:strokeWidth="2"
-        android:strokeColor="#555566"
-        android:fillColor="#555566" />
 
-    <!-- Decorative Accent Pill / Live Badge -->
+    <!-- LIVE Pill Badge -->
     <path
-        android:pathData="M110,50 L158,50 A6,6 0 0,1 164,56 L164,66 A6,6 0 0,1 158,72 L110,72 A6,6 0 0,1 104,66 L104,56 A6,6 0 0,1 110,50 Z"
+        android:pathData="M112,42 L160,42 A5,5 0 0,1 165,47 L165,57 A5,5 0 0,1 160,62 L112,62 A5,5 0 0,1 107,47 L107,47 A5,5 0 0,1 112,42 Z"
         android:fillColor="#ff7a1a" />
-    <!-- Live dot inside badge -->
     <path
-        android:pathData="M114,61 A3,3 0 1,1 114,61.01"
+        android:pathData="M116,52 A3,3 0 1,1 116,52.01"
         android:fillColor="#ffffff" />
+    <!-- Letter L -->
+    <path android:pathData="M125,47 L125,57 L130,57" android:strokeWidth="1.5" android:strokeColor="#ffffff" />
+    <!-- Letter I -->
+    <path android:pathData="M135,47 L135,57" android:strokeWidth="1.5" android:strokeColor="#ffffff" />
+    <!-- Letter V -->
+    <path android:pathData="M141,47 L144,57 L147,47" android:strokeWidth="1.5" android:strokeColor="#ffffff" />
+    <!-- Letter E -->
+    <path android:pathData="M152,47 L152,57 L157,57 M152,52 L156,52 M152,47 L157,47" android:strokeWidth="1.5" android:strokeColor="#ffffff" />
 
-    <!-- High energy lines on right -->
+    <!-- Typography: MAZZE (Path geometric letters) -->
+    <!-- M -->
     <path
-        android:pathData="M230,45 L290,45"
-        android:strokeWidth="3"
+        android:pathData="M110,104 L110,72 L119,92 L128,72 L128,104"
+        android:strokeWidth="5"
+        android:strokeColor="#ffffff"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- A -->
+    <path
+        android:pathData="M136,104 L145,72 L154,104 M139,94 L151,94"
+        android:strokeWidth="5"
+        android:strokeColor="#ffffff"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- Z -->
+    <path
+        android:pathData="M162,72 L178,72 L162,104 L178,104"
+        android:strokeWidth="5"
+        android:strokeColor="#ff7a1a"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- Z -->
+    <path
+        android:pathData="M186,72 L202,72 L186,104 L202,104"
+        android:strokeWidth="5"
+        android:strokeColor="#ff7a1a"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- E -->
+    <path
+        android:pathData="M210,104 L210,72 L226,72 M210,88 L222,88 M210,104 L226,104"
+        android:strokeWidth="5"
+        android:strokeColor="#ffffff"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Typography: SPORTS (Path geometric letters in Lime) -->
+    <!-- S -->
+    <path
+        android:pathData="M112,122 L124,122 L124,129 L112,132 L112,140 L124,140"
+        android:strokeWidth="3.2"
+        android:strokeColor="#a3e635"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- P -->
+    <path
+        android:pathData="M132,140 L132,122 L143,122 L143,131 L132,131"
+        android:strokeWidth="3.2"
+        android:strokeColor="#a3e635"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- O -->
+    <path
+        android:pathData="M151,122 L162,122 L162,140 L151,140 Z"
+        android:strokeWidth="3.2"
+        android:strokeColor="#a3e635"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- R -->
+    <path
+        android:pathData="M170,140 L170,122 L181,122 L181,131 L170,131 M178,131 L182,140"
+        android:strokeWidth="3.2"
+        android:strokeColor="#a3e635"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- T -->
+    <path
+        android:pathData="M189,122 L201,122 M195,122 L195,140"
+        android:strokeWidth="3.2"
+        android:strokeColor="#a3e635"
+        android:strokeLineCap="round" />
+    <!-- S -->
+    <path
+        android:pathData="M208,122 L220,122 L220,129 L208,132 L208,140 L220,140"
+        android:strokeWidth="3.2"
+        android:strokeColor="#a3e635"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- TV Pill Tag on Right -->
+    <path
+        android:pathData="M232,122 L258,122 A3,3 0 0,1 261,125 L261,137 A3,3 0 0,1 258,140 L232,140 A3,3 0 0,1 229,137 L229,125 A3,3 0 0,1 232,122 Z"
+        android:fillColor="#1f1f2e"
+        android:strokeWidth="1.5"
+        android:strokeColor="#ff7a1a" />
+    <!-- T -->
+    <path android:pathData="M236,126 L244,126 M240,126 L240,136" android:strokeWidth="1.8" android:strokeColor="#ff7a1a" />
+    <!-- V -->
+    <path android:pathData="M247,126 L251,136 L255,126" android:strokeWidth="1.8" android:strokeColor="#ff7a1a" />
+
+    <!-- High energy lines right -->
+    <path
+        android:pathData="M240,55 L296,55"
+        android:strokeWidth="2.5"
         android:strokeColor="#ff7a1a"
         android:strokeLineCap="round" />
     <path
-        android:pathData="M250,55 L300,55"
-        android:strokeWidth="2.5"
+        android:pathData="M260,65 L306,65"
+        android:strokeWidth="2"
         android:strokeColor="#a3e635"
         android:strokeLineCap="round" />
-    <path
-        android:pathData="M220,125 L300,125"
-        android:strokeWidth="1.5"
-        android:strokeColor="#44ff7a1a" />
 </vector>

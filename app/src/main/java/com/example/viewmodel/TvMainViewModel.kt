@@ -82,17 +82,81 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     private val _updateInfo = MutableStateFlow(UpdateInfo())
     val updateInfo: StateFlow<UpdateInfo> = _updateInfo.asStateFlow()
 
+    // NCAA CFB AP Top 20 & SEC Focus state
+    private val _ncaaFootballData = MutableStateFlow(NcaaFootballData())
+    val ncaaFootballData: StateFlow<NcaaFootballData> = _ncaaFootballData.asStateFlow()
+
+    private val _channelSearchFilter = MutableStateFlow("")
+    val channelSearchFilter: StateFlow<String> = _channelSearchFilter.asStateFlow()
+
     private var pollJob: Job? = null
+    private var ncaaPollJob: Job? = null
     private val timeFormat = SimpleDateFormat("h:mm:ss a", Locale.getDefault())
 
     init {
         _spoilerFree.value = _playlistConfig.value.spoilerFree
         loadChannels()
         startScoreboardPolling()
+        startNcaaPolling()
     }
 
     fun setScreen(screenIndex: Int) {
         _currentScreen.value = screenIndex
+    }
+
+    fun setChannelSearchFilter(query: String) {
+        _channelSearchFilter.value = query
+    }
+
+    fun openChannelsWithFilter(query: String) {
+        _channelSearchFilter.value = query
+        _currentScreen.value = 2 // Channels Screen
+    }
+
+    private fun startNcaaPolling() {
+        ncaaPollJob?.cancel()
+        ncaaPollJob = viewModelScope.launch {
+            while (isActive) {
+                fetchNcaaFootball()
+                delay(5 * 60 * 1000L) // 5 minutes refresh
+            }
+        }
+    }
+
+    suspend fun fetchNcaaFootball() {
+        val res = espnRepo.fetchNcaaFootballAndRankings()
+        if (res.isSuccess) {
+            _ncaaFootballData.value = res.getOrNull() ?: NcaaFootballData()
+        }
+    }
+
+    fun matchChannelForNcaaGame(game: NcaaGame): Channel? {
+        val currentChannels = _channels.value
+        if (currentChannels.isEmpty()) return null
+
+        val homeName = game.homeTeam.displayName.lowercase(Locale.ROOT)
+        val awayName = game.awayTeam.displayName.lowercase(Locale.ROOT)
+        val homeAbbr = game.homeTeam.abbreviation.lowercase(Locale.ROOT)
+        val awayAbbr = game.awayTeam.abbreviation.lowercase(Locale.ROOT)
+        val netLower = game.network.lowercase(Locale.ROOT)
+
+        // 1. Try exact team or network match in playlist
+        currentChannels.find { ch ->
+            val cName = ch.name.lowercase(Locale.ROOT)
+            (homeAbbr.length >= 3 && cName.contains(homeAbbr)) ||
+            (awayAbbr.length >= 3 && cName.contains(awayAbbr)) ||
+            (homeName.length > 3 && cName.contains(homeName)) ||
+            (awayName.length > 3 && cName.contains(awayName)) ||
+            (netLower.length > 2 && cName.contains(netLower))
+        }?.let { return it }
+
+        // 2. Try generic CFB / college sports
+        return currentChannels.find { ch ->
+            val cName = ch.name.lowercase(Locale.ROOT)
+            val cGrp = ch.groupTitle.lowercase(Locale.ROOT)
+            cName.contains("college") || cName.contains("ncaa") || cName.contains("acc") ||
+            cName.contains("sec") || cGrp.contains("college")
+        }
     }
 
     fun setFullScreenPlayer(fullScreen: Boolean) {

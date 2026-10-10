@@ -49,6 +49,8 @@ class MainActivity : ComponentActivity() {
 
                 val playlistConfig by viewModel.playlistConfig.collectAsStateWithLifecycle()
                 val updateInfo by viewModel.updateInfo.collectAsStateWithLifecycle()
+                val ncaaFootballData by viewModel.ncaaFootballData.collectAsStateWithLifecycle()
+                val channelSearchFilter by viewModel.channelSearchFilter.collectAsStateWithLifecycle()
 
                 // TV Back navigation handler
                 BackHandler(enabled = isFullScreen || currentScreen != 0) {
@@ -111,6 +113,7 @@ class MainActivity : ComponentActivity() {
                                     0 -> HomeScreen(
                                         games = games,
                                         channels = channels,
+                                        ncaaFootballData = ncaaFootballData,
                                         currentPlayingChannel = currentPlayingChannel,
                                         isOffline = isOffline,
                                         lastUpdatedTime = lastUpdatedTime,
@@ -126,6 +129,18 @@ class MainActivity : ComponentActivity() {
                                             if (matched != null) {
                                                 viewModel.setPlayingChannel(matched)
                                             }
+                                        },
+                                        onSelectNcaaGame = { ncaaGame ->
+                                            val matched = viewModel.matchChannelForNcaaGame(ncaaGame)
+                                            if (matched != null) {
+                                                viewModel.setPlayingChannel(matched)
+                                            } else {
+                                                val query = "${ncaaGame.awayTeam.displayName} ${ncaaGame.homeTeam.displayName}"
+                                                viewModel.openChannelsWithFilter(query)
+                                            }
+                                        },
+                                        onSelectNcaaTeam = { teamName ->
+                                            viewModel.openChannelsWithFilter(teamName)
                                         },
                                         onToggleSpoiler = { viewModel.toggleSpoilerReveal(it) },
                                         onExpandFullScreen = { viewModel.setFullScreenPlayer(true) },
@@ -154,6 +169,8 @@ class MainActivity : ComponentActivity() {
                                     2 -> ChannelsScreen(
                                         channels = channels,
                                         selectedChannel = currentPlayingChannel,
+                                        searchQuery = channelSearchFilter,
+                                        onClearSearch = { viewModel.setChannelSearchFilter("") },
                                         onChannelSelected = { viewModel.setPlayingChannel(it) },
                                         onToggleFavorite = { viewModel.toggleFavorite(it) },
                                         onExpandFullScreen = { ch ->

@@ -63,7 +63,10 @@ fun MultiviewScreen(
                 )
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Text(
                     text = "Active Sound: Tile ${activeSoundIndex + 1}",
                     color = TvOrangeFocus,
@@ -74,6 +77,7 @@ fun MultiviewScreen(
                         .background(TvDarkCardElevated)
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 )
+                com.example.ui.components.TvClock()
             }
         }
 

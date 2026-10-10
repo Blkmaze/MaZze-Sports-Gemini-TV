@@ -72,12 +72,18 @@ fun SquaresScreen(
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Black
                     )
-                    Text(
-                        text = "Refundable if the board does not fill",
-                        color = TvLimeAccent,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Refundable if the board does not fill",
+                            color = TvLimeAccent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        com.example.ui.components.TvClock()
+                    }
                 }
 
                 Text(

@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.model.Channel
 import com.example.model.Game
+import com.example.model.NcaaFootballData
+import com.example.model.NcaaGame
 import com.example.player.TvStreamPlayer
 import com.example.ui.components.*
 import com.example.ui.theme.*
@@ -35,12 +37,15 @@ import com.example.ui.theme.*
 fun HomeScreen(
     games: List<Game>,
     channels: List<Channel>,
+    ncaaFootballData: NcaaFootballData,
     currentPlayingChannel: Channel?,
     isOffline: Boolean,
     lastUpdatedTime: String,
     spoilerFree: Boolean,
     revealedGameIds: Set<String>,
     onSelectGame: (Game) -> Unit,
+    onSelectNcaaGame: (NcaaGame) -> Unit,
+    onSelectNcaaTeam: (String) -> Unit = {},
     onToggleSpoiler: (String) -> Unit,
     onExpandFullScreen: () -> Unit,
     onNextChannel: () -> Unit = {},
@@ -136,6 +141,8 @@ fun HomeScreen(
                             onClick = onNavigateToSettings
                         )
                     }
+
+                    TvClock()
                 }
             }
         }
@@ -290,7 +297,110 @@ fun HomeScreen(
             }
         }
 
-        // 3. Up Next List
+        // 3. Top 20 NCAA Football - SEC Focus Section
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Top 20 NCAA Football - SEC Focus",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(TvLimeAccent)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "SEC",
+                                color = Color.Black,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+
+                    if (ncaaFootballData.lastUpdated.isNotBlank()) {
+                        Text(
+                            text = "AP Poll & SEC • Synced ${ncaaFootballData.lastUpdated}",
+                            color = TvTextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                // Horizontal strip of focusable cards 'AP Top 20' with rank and team
+                if (ncaaFootballData.apTop20.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "AP Top 20",
+                                color = TvLimeAccent,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "• SEC teams highlighted in lime",
+                                color = TvTextMuted,
+                                fontSize = 10.sp
+                            )
+                        }
+
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(end = 24.dp)
+                        ) {
+                            items(ncaaFootballData.apTop20, key = { it.teamId.ifEmpty { "rank_${it.rank}" } }) { rankItem ->
+                                ApTop20Card(
+                                    rankItem = rankItem,
+                                    onClick = {
+                                        onSelectNcaaTeam(rankItem.displayName.ifEmpty { rankItem.name })
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Vertically scrollable list of NCAA games
+                if (ncaaFootballData.games.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(72.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(TvDarkCard),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Loading Top 20 & SEC matchups from ESPN...",
+                            color = TvTextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ncaaFootballData.games.forEach { ncaaGame ->
+                            NcaaGameRow(
+                                game = ncaaGame,
+                                onClick = { onSelectNcaaGame(ncaaGame) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Up Next List
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(

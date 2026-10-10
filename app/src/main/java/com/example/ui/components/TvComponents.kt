@@ -30,8 +30,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.model.ApTeamRank
 import com.example.model.Game
+import com.example.model.NcaaGame
+import com.example.model.Team
 import com.example.ui.theme.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun TvFocusCard(
@@ -569,3 +577,327 @@ fun ScoreBarOverlay(
         }
     }
 }
+
+@Composable
+fun TvClock(modifier: Modifier = Modifier) {
+    var dateTimeText by remember { mutableStateOf(formatLiveClock()) }
+
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            dateTimeText = formatLiveClock()
+            val millisToNextMinute = 60_000L - (System.currentTimeMillis() % 60_000L)
+            delay(maxOf(1000L, millisToNextMinute))
+        }
+    }
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(TvDarkCardElevated)
+            .border(1.dp, TvDarkSurface, RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.Schedule,
+            contentDescription = null,
+            tint = TvLimeAccent,
+            modifier = Modifier.size(14.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = dateTimeText,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+private fun formatLiveClock(): String {
+    val sdf = SimpleDateFormat("EEE, MMM d, yyyy • h:mm a", Locale.getDefault())
+    return sdf.format(Date())
+}
+
+@Composable
+fun ApTop20Card(
+    rankItem: ApTeamRank,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    TvFocusCard(
+        onClick = onClick,
+        modifier = modifier
+            .width(136.dp)
+            .height(58.dp),
+        shape = RoundedCornerShape(10.dp),
+        containerColor = if (rankItem.isSec) Color(0xFF162016) else TvDarkCard,
+        focusedBorderColor = TvOrangeFocus,
+        unfocusedBorderColor = if (rankItem.isSec) TvLimeAccent else Color.Transparent,
+        borderWidth = if (rankItem.isSec) 1.5.dp else 1.dp
+    ) { isFocused ->
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                // Rank Badge
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (rankItem.isSec) TvLimeAccent else TvOrangeFocus)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "#${rankItem.rank}",
+                        color = Color.Black,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // Logo
+                if (!rankItem.logoUrl.isNullOrEmpty()) {
+                    AsyncImage(
+                        model = rankItem.logoUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clip(CircleShape)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                }
+
+                // Team name
+                Text(
+                    text = rankItem.displayName.ifEmpty { rankItem.name },
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (rankItem.isSec) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(Color(0x33A3E635))
+                        .padding(horizontal = 3.dp, vertical = 1.dp)
+                ) {
+                    Text(
+                        text = "SEC",
+                        color = TvLimeAccent,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NcaaGameRow(
+    game: NcaaGame,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    TvFocusCard(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(64.dp),
+        shape = RoundedCornerShape(10.dp),
+        containerColor = if (game.isSecMatch) Color(0xFF141914) else TvDarkCard,
+        focusedBorderColor = TvOrangeFocus,
+        unfocusedBorderColor = if (game.isSecMatch) Color(0x33A3E635) else TvDarkCardElevated,
+        borderWidth = if (game.isSecMatch) 1.dp else 1.dp
+    ) { isFocused ->
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Left: Team Matchup with Rank Badges
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1.3f)
+            ) {
+                // Away Team with Rank Badge
+                TeamRankDisplay(
+                    rank = game.awayRank,
+                    team = game.awayTeam
+                )
+
+                Text(
+                    text = " vs ",
+                    color = TvTextMuted,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+
+                // Home Team with Rank Badge
+                TeamRankDisplay(
+                    rank = game.homeRank,
+                    team = game.homeTeam
+                )
+            }
+
+            // Right: Kickoff / Live Score + TV Network + SEC Tag
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Kickoff day & time or live score
+                Column(horizontalAlignment = Alignment.End) {
+                    if (game.isLive) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(TvLiveRed)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "LIVE: ${game.awayScore} - ${game.homeScore}",
+                                color = TvLiveRed,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text(
+                            text = game.statusDetail,
+                            color = TvTextSecondary,
+                            fontSize = 10.sp
+                        )
+                    } else if (game.isFinal) {
+                        Text(
+                            text = "FINAL: ${game.awayScore} - ${game.homeScore}",
+                            color = TvTextMuted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else {
+                        Text(
+                            text = game.kickoffDisplay,
+                            color = TvTextPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                // Network Tag
+                if (game.network.isNotBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(TvDarkCardElevated)
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = game.network,
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Lime SEC Tag
+                if (game.isSecMatch) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(TvLimeAccent)
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "SEC",
+                            color = Color.Black,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+
+                // Play / Watch prompt on focus
+                if (isFocused) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(TvOrangeFocus)
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "OK: Watch",
+                            color = Color.Black,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TeamRankDisplay(
+    rank: Int?,
+    team: Team
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (rank != null && rank in 1..20) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(TvOrangeFocus)
+                    .padding(horizontal = 4.dp, vertical = 1.dp)
+            ) {
+                Text(
+                    text = "#$rank",
+                    color = Color.Black,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+            Spacer(modifier = Modifier.width(5.dp))
+        }
+
+        if (!team.logo.isNullOrEmpty()) {
+            AsyncImage(
+                model = team.logo,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(20.dp)
+                    .clip(CircleShape)
+            )
+            Spacer(modifier = Modifier.width(5.dp))
+        }
+
+        Text(
+            text = team.displayName,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+

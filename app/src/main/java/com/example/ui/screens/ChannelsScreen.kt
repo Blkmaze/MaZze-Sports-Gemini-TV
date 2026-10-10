@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.model.Channel
 import com.example.player.TvStreamPlayer
+import com.example.ui.components.TvClock
 import com.example.ui.components.TvFocusButton
 import com.example.ui.theme.*
 import kotlinx.coroutines.launch
@@ -36,6 +37,8 @@ import kotlinx.coroutines.launch
 fun ChannelsScreen(
     channels: List<Channel>,
     selectedChannel: Channel?,
+    searchQuery: String = "",
+    onClearSearch: () -> Unit = {},
     onChannelSelected: (Channel) -> Unit,
     onToggleFavorite: (String) -> Unit,
     onExpandFullScreen: (Channel) -> Unit,
@@ -46,8 +49,17 @@ fun ChannelsScreen(
     val listState = rememberLazyListState()
     var filterFavoritesOnly by remember { mutableStateOf(false) }
 
-    val displayedChannels = remember(channels, filterFavoritesOnly) {
-        if (filterFavoritesOnly) channels.filter { it.isFavorite } else channels
+    val displayedChannels = remember(channels, filterFavoritesOnly, searchQuery) {
+        val base = if (filterFavoritesOnly) channels.filter { it.isFavorite } else channels
+        if (searchQuery.isNotBlank()) {
+            val qTerms = searchQuery.lowercase(java.util.Locale.ROOT).split(" ").filter { it.length > 2 }
+            base.filter { ch ->
+                val chName = ch.name.lowercase(java.util.Locale.ROOT)
+                val chGrp = ch.groupTitle.lowercase(java.util.Locale.ROOT)
+                qTerms.any { t -> chName.contains(t) || chGrp.contains(t) } ||
+                chName.contains(searchQuery.lowercase(java.util.Locale.ROOT))
+            }
+        } else base
     }
 
     val alphabet = ('A'..'Z').toList()
@@ -65,7 +77,7 @@ fun ChannelsScreen(
                 .fillMaxHeight(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Header: Filter & Count
+            // Header: Filter & Count & Clock
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -87,11 +99,44 @@ fun ChannelsScreen(
                     )
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     TvFocusButton(
                         text = if (filterFavoritesOnly) "Showing: Favorites" else "Filter: All",
                         icon = if (filterFavoritesOnly) Icons.Default.Star else Icons.Default.StarBorder,
                         onClick = { filterFavoritesOnly = !filterFavoritesOnly }
+                    )
+                    TvClock()
+                }
+            }
+
+            // Search query banner if active
+            if (searchQuery.isNotBlank()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(TvDarkCardElevated)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Filtered by: '$searchQuery'",
+                        color = TvOrangeFocus,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Clear Filter [X]",
+                        color = TvLimeAccent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clickable { onClearSearch() }
+                            .padding(4.dp)
                     )
                 }
             }

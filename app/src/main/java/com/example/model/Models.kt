@@ -80,3 +80,43 @@ data class UpdateInfo(
     val errorMessage: String? = null,
     val readyToInstallPath: String? = null
 )
+
+// NCAA AP Top 20 & SEC Focus Models
+data class ApTeamRank(
+    val rank: Int,
+    val teamId: String,
+    val name: String,
+    val displayName: String,
+    val abbreviation: String,
+    val logoUrl: String?,
+    val isSec: Boolean = false
+)
+
+data class NcaaGame(
+    val id: String,
+    val name: String,
+    val homeTeam: Team,
+    val awayTeam: Team,
+    val homeRank: Int? = null,
+    val awayRank: Int? = null,
+    val homeScore: String = "0",
+    val awayScore: String = "0",
+    val state: String = "pre", // "in", "pre", "post"
+    val statusDetail: String = "",
+    val startTime: String = "",
+    val kickoffDisplay: String = "",
+    val network: String = "",
+    val isSecMatch: Boolean = false,
+    val tier: Int = 0, // 0 = SEC Ranked, 1 = Other Ranked, 2 = SEC Unranked
+    val bestRank: Int = 99,
+    val matchedChannel: Channel? = null
+) {
+    val isLive: Boolean get() = state == "in"
+    val isFinal: Boolean get() = state == "post"
+}
+
+data class NcaaFootballData(
+    val apTop20: List<ApTeamRank> = emptyList(),
+    val games: List<NcaaGame> = emptyList(),
+    val lastUpdated: String = ""
+)

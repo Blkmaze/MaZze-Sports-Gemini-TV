@@ -61,12 +61,18 @@ fun SettingsScreen(
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Black
                 )
-                Text(
-                    text = "MaZze Sports TV v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
-                    color = TvLimeAccent,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
+                        color = TvLimeAccent,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    com.example.ui.components.TvClock()
+                }
             }
         }
 
