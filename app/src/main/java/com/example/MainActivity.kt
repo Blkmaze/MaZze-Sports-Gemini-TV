@@ -19,6 +19,10 @@ import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.TvDarkBackground
 import com.example.viewmodel.TvMainViewModel
+import java.io.File
+import java.io.PrintWriter
+import java.io.StringWriter
+import java.util.Date
 
 class MainActivity : ComponentActivity() {
 
@@ -27,6 +31,22 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // Global Uncaught Exception Handler: saves stack trace to filesDir/last_crash.txt
+        val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                val crashFile = File(filesDir, "last_crash.txt")
+                val sw = StringWriter()
+                val pw = PrintWriter(sw)
+                throwable.printStackTrace(pw)
+                crashFile.writeText("Crash Time: ${Date()}\nThread: ${thread.name}\n\n${sw}")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            prevHandler?.uncaughtException(thread, throwable) ?: kotlin.system.exitProcess(1)
+        }
+
         enableEdgeToEdge()
 
         setContent {
@@ -54,6 +74,7 @@ class MainActivity : ComponentActivity() {
                 val updateInfo by viewModel.updateInfo.collectAsStateWithLifecycle()
                 val ncaaFootballData by viewModel.ncaaFootballData.collectAsStateWithLifecycle()
                 val channelSearchFilter by viewModel.channelSearchFilter.collectAsStateWithLifecycle()
+                val lastCrashReport by viewModel.lastCrashReport.collectAsStateWithLifecycle()
 
                 // TV Back navigation handler
                 BackHandler(enabled = isFullScreen || currentScreen != 0) {
@@ -75,13 +96,13 @@ class MainActivity : ComponentActivity() {
                         onNextChannel = {
                             if (channels.isNotEmpty()) {
                                 val nextIdx = if (channelIndex >= 0) (channelIndex + 1) % channels.size else 0
-                                viewModel.setPlayingChannel(channels[nextIdx])
+                                channels.getOrNull(nextIdx)?.let { viewModel.setPlayingChannel(it) }
                             }
                         },
                         onPreviousChannel = {
                             if (channels.isNotEmpty()) {
                                 val prevIdx = if (channelIndex > 0) channelIndex - 1 else channels.size - 1
-                                viewModel.setPlayingChannel(channels[prevIdx])
+                                channels.getOrNull(prevIdx)?.let { viewModel.setPlayingChannel(it) }
                             }
                         },
                         modifier = Modifier.fillMaxSize()
@@ -136,7 +157,7 @@ class MainActivity : ComponentActivity() {
                                             if (channels.isNotEmpty()) {
                                                 val currIdx = channels.indexOfFirst { it.id == currentPlayingChannel?.id }
                                                 val nextIdx = if (currIdx >= 0) (currIdx + 1) % channels.size else 0
-                                                viewModel.setPlayingChannel(channels[nextIdx])
+                                                channels.getOrNull(nextIdx)?.let { viewModel.setPlayingChannel(it) }
                                             }
                                         },
                                         onNavigateToSettings = { viewModel.setScreen(4) },
@@ -149,7 +170,8 @@ class MainActivity : ComponentActivity() {
                                         },
                                         onFindChannel = { query ->
                                             viewModel.openChannelsWithFilter(query)
-                                        }
+                                        },
+                                        isHeroPlayerActive = (currentScreen == 0 && !isFullScreen)
                                     )
 
                                     1 -> MultiviewScreen(
@@ -199,6 +221,8 @@ class MainActivity : ComponentActivity() {
                                         playlistConfig = playlistConfig,
                                         updateInfo = updateInfo,
                                         spoilerFree = spoilerFree,
+                                        lastCrashReport = lastCrashReport,
+                                        onClearCrashReport = { viewModel.clearCrashReport() },
                                         onSaveConfig = { viewModel.updatePlaylistConfig(it) },
                                         onLoadDemo = { viewModel.loadDemoChannels() },
                                         onToggleSpoilerFree = { viewModel.toggleSpoilerFreeMode() },
@@ -209,8 +233,12 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
-                }
             }
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Activity stopped: all active players are released via lifecycle observers
     }
 }

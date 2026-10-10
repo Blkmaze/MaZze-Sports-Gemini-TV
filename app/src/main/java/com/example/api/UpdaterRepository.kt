@@ -70,51 +70,55 @@ class UpdaterRepository(
             return UpdateInfo(currentBuildNumber = currentBuild, errorMessage = "Empty response from GitHub")
         }
 
-        val json = JSONObject(jsonStr)
-        val bodyText = json.optString("body", "")
-        val tagName = json.optString("tag_name", "Gemini-latest")
-        val releaseName = json.optString("name", "MaZze Sports TV")
+        return try {
+            val json = JSONObject(jsonStr)
+            val bodyText = json.optString("body", "")
+            val tagName = json.optString("tag_name", "Gemini-latest")
+            val releaseName = json.optString("name", "MaZze Sports TV")
 
-        // Parse "Automated build N"
-        val pattern = Pattern.compile("Automated build\\s+(\\d+)", Pattern.CASE_INSENSITIVE)
-        val matcher = pattern.matcher(bodyText)
-        var latestBuild = 0
-        if (matcher.find()) {
-            latestBuild = matcher.group(1)?.toIntOrNull() ?: 0
-        }
-
-        // Also check tag or title if body didn't specify
-        if (latestBuild == 0) {
-            val titleMatcher = Pattern.compile("Build\\s+(\\d+)", Pattern.CASE_INSENSITIVE).matcher(releaseName)
-            if (titleMatcher.find()) {
-                latestBuild = titleMatcher.group(1)?.toIntOrNull() ?: 0
+            // Parse "Automated build N"
+            val pattern = Pattern.compile("Automated build\\s+(\\d+)", Pattern.CASE_INSENSITIVE)
+            val matcher = pattern.matcher(bodyText)
+            var latestBuild = 0
+            if (matcher.find()) {
+                latestBuild = matcher.group(1)?.toIntOrNull() ?: 0
             }
-        }
 
-        // Find APK asset
-        var downloadUrl: String? = null
-        val assets = json.optJSONArray("assets")
-        if (assets != null) {
-            for (i in 0 until assets.length()) {
-                val asset = assets.optJSONObject(i) ?: continue
-                val name = asset.optString("name", "")
-                if (name.endsWith(".apk", ignoreCase = true)) {
-                    downloadUrl = asset.optString("browser_download_url", null)
-                    break
+            // Also check tag or title if body didn't specify
+            if (latestBuild == 0) {
+                val titleMatcher = Pattern.compile("Build\\s+(\\d+)", Pattern.CASE_INSENSITIVE).matcher(releaseName)
+                if (titleMatcher.find()) {
+                    latestBuild = titleMatcher.group(1)?.toIntOrNull() ?: 0
                 }
             }
+
+            // Find APK asset
+            var downloadUrl: String? = null
+            val assets = json.optJSONArray("assets")
+            if (assets != null) {
+                for (i in 0 until assets.length()) {
+                    val asset = assets.optJSONObject(i) ?: continue
+                    val name = asset.optString("name", "")
+                    if (name.endsWith(".apk", ignoreCase = true)) {
+                        downloadUrl = asset.optString("browser_download_url", null)
+                        break
+                    }
+                }
+            }
+
+            val hasUpdate = latestBuild > currentBuild && !downloadUrl.isNullOrEmpty()
+
+            UpdateInfo(
+                latestBuildNumber = latestBuild,
+                currentBuildNumber = currentBuild,
+                hasUpdate = hasUpdate,
+                releaseTitle = releaseName.ifBlank { tagName },
+                downloadUrl = downloadUrl,
+                errorMessage = if (latestBuild <= currentBuild) "App is up to date (Build $currentBuild)" else null
+            )
+        } catch (e: Exception) {
+            UpdateInfo(currentBuildNumber = currentBuild, errorMessage = "Failed to parse release: ${e.localizedMessage}")
         }
-
-        val hasUpdate = latestBuild > currentBuild && !downloadUrl.isNullOrEmpty()
-
-        return UpdateInfo(
-            latestBuildNumber = latestBuild,
-            currentBuildNumber = currentBuild,
-            hasUpdate = hasUpdate,
-            releaseTitle = releaseName.ifBlank { tagName },
-            downloadUrl = downloadUrl,
-            errorMessage = if (latestBuild <= currentBuild) "App is up to date (Build $currentBuild)" else null
-        )
     }
 
     suspend fun downloadAndInstallApk(

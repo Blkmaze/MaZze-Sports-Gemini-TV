@@ -2,9 +2,14 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -13,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -27,6 +33,8 @@ fun SettingsScreen(
     playlistConfig: PlaylistConfig,
     updateInfo: UpdateInfo,
     spoilerFree: Boolean,
+    lastCrashReport: String? = null,
+    onClearCrashReport: () -> Unit = {},
     onSaveConfig: (PlaylistConfig) -> Unit,
     onLoadDemo: () -> Unit,
     onToggleSpoilerFree: () -> Unit,
@@ -383,6 +391,77 @@ fun SettingsScreen(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
+                }
+            }
+        }
+
+        // 5. Last Crash Report Section
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(TvDarkCard)
+                    .border(1.dp, TvDarkCardElevated, RoundedCornerShape(14.dp))
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Last Crash Report",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (lastCrashReport != null) "Crash captured on device before process exited" else "No crash recorded - app running normally",
+                            color = if (lastCrashReport != null) TvOrangeFocus else TvTextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    if (lastCrashReport != null) {
+                        TvFocusButton(
+                            text = "Clear Report",
+                            icon = Icons.Default.Delete,
+                            onClick = onClearCrashReport
+                        )
+                    }
+                }
+
+                if (lastCrashReport != null) {
+                    val interactionSource = remember { MutableInteractionSource() }
+                    val isFocused by interactionSource.collectIsFocusedAsState()
+                    val scrollState = rememberScrollState()
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 120.dp, max = 260.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(TvDarkSurface)
+                            .border(
+                                width = if (isFocused) 2.5.dp else 1.dp,
+                                color = if (isFocused) TvOrangeFocus else TvDarkCardElevated,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .focusable(interactionSource = interactionSource)
+                            .verticalScroll(scrollState)
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = lastCrashReport,
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 16.sp
+                        )
+                    }
                 }
             }
         }

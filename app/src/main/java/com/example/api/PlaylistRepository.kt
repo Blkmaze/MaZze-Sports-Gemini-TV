@@ -162,9 +162,13 @@ class PlaylistRepository(
     }
 
     private fun extractAttribute(line: String, attr: String): String {
-        val pattern = """$attr="([^"]*)"""".toRegex(RegexOption.IGNORE_CASE)
-        val match = pattern.find(line)
-        return match?.groupValues?.get(1)?.trim() ?: ""
+        return try {
+            val pattern = """$attr="([^"]*)"""".toRegex(RegexOption.IGNORE_CASE)
+            val match = pattern.find(line)
+            match?.groupValues?.getOrNull(1)?.trim() ?: ""
+        } catch (e: Exception) {
+            ""
+        }
     }
 
     private suspend fun fetchXtream(config: PlaylistConfig): List<Channel> {

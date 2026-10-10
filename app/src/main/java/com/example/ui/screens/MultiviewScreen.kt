@@ -41,9 +41,16 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.Lifecycle
+import android.util.Log
 import com.example.model.Channel
 import com.example.ui.components.TvClock
 import com.example.ui.components.TvFocusButton
@@ -66,6 +73,18 @@ fun MultiviewScreen(
 ) {
     var activeMenuTile by remember { mutableStateOf<Int?>(null) }
     var channelPickerSlot by remember { mutableStateOf<Int?>(null) }
+
+    // (1) Never run more than 2 hardware video decoders at once:
+    // only activeSoundIndex and secondaryPlayingTile get full playback.
+    var secondaryPlayingTile by remember {
+        mutableIntStateOf(if (activeSoundIndex == 0) 1 else 0)
+    }
+
+    LaunchedEffect(activeSoundIndex) {
+        if (secondaryPlayingTile == activeSoundIndex) {
+            secondaryPlayingTile = (activeSoundIndex + 1) % 4
+        }
+    }
 
     // Focus requesters for the 4 grid tiles
     val tileFocusRequesters = remember { List(4) { FocusRequester() } }
@@ -138,8 +157,10 @@ fun MultiviewScreen(
                     channel = multiviewChannels.getOrNull(0),
                     gameTitle = multiviewGameTitles.getOrNull(0),
                     isSoundActive = activeSoundIndex == 0,
+                    isPlaybackEnabled = (0 == activeSoundIndex || 0 == secondaryPlayingTile),
                     focusRequester = tileFocusRequesters[0],
-                    onClick = { activeMenuTile = 0 },
+                    onStartPlayback = { secondaryPlayingTile = 0 },
+                    onOpenMenu = { activeMenuTile = 0 },
                     onTryBackup = { onCycleTileBackup(0) },
                     modifier = Modifier
                         .weight(1f)
@@ -155,8 +176,10 @@ fun MultiviewScreen(
                     channel = multiviewChannels.getOrNull(1),
                     gameTitle = multiviewGameTitles.getOrNull(1),
                     isSoundActive = activeSoundIndex == 1,
+                    isPlaybackEnabled = (1 == activeSoundIndex || 1 == secondaryPlayingTile),
                     focusRequester = tileFocusRequesters[1],
-                    onClick = { activeMenuTile = 1 },
+                    onStartPlayback = { secondaryPlayingTile = 1 },
+                    onOpenMenu = { activeMenuTile = 1 },
                     onTryBackup = { onCycleTileBackup(1) },
                     modifier = Modifier
                         .weight(1f)
@@ -180,8 +203,10 @@ fun MultiviewScreen(
                     channel = multiviewChannels.getOrNull(2),
                     gameTitle = multiviewGameTitles.getOrNull(2),
                     isSoundActive = activeSoundIndex == 2,
+                    isPlaybackEnabled = (2 == activeSoundIndex || 2 == secondaryPlayingTile),
                     focusRequester = tileFocusRequesters[2],
-                    onClick = { activeMenuTile = 2 },
+                    onStartPlayback = { secondaryPlayingTile = 2 },
+                    onOpenMenu = { activeMenuTile = 2 },
                     onTryBackup = { onCycleTileBackup(2) },
                     modifier = Modifier
                         .weight(1f)
@@ -197,8 +222,10 @@ fun MultiviewScreen(
                     channel = multiviewChannels.getOrNull(3),
                     gameTitle = multiviewGameTitles.getOrNull(3),
                     isSoundActive = activeSoundIndex == 3,
+                    isPlaybackEnabled = (3 == activeSoundIndex || 3 == secondaryPlayingTile),
                     focusRequester = tileFocusRequesters[3],
-                    onClick = { activeMenuTile = 3 },
+                    onStartPlayback = { secondaryPlayingTile = 3 },
+                    onOpenMenu = { activeMenuTile = 3 },
                     onTryBackup = { onCycleTileBackup(3) },
                     modifier = Modifier
                         .weight(1f)
@@ -278,10 +305,26 @@ fun MultiviewScreen(
                         isHighlighted = activeSoundIndex == slot,
                         autoFocus = true,
                         onClick = {
+                            val prevSound = activeSoundIndex
                             onSetSoundIndex(slot)
+                            if (secondaryPlayingTile == slot) {
+                                secondaryPlayingTile = prevSound
+                            }
                             activeMenuTile = null
                         }
                     )
+
+                    // Button 1b: Play Video in This Tile (if not currently decoding video)
+                    if (slot != activeSoundIndex && slot != secondaryPlayingTile && currentChannel != null) {
+                        MultiviewMenuButton(
+                            text = "Play Video in This Tile",
+                            icon = Icons.Default.PlayArrow,
+                            onClick = {
+                                secondaryPlayingTile = slot
+                                activeMenuTile = null
+                            }
+                        )
+                    }
 
                     // Button 2: Fullscreen
                     MultiviewMenuButton(
@@ -347,14 +390,19 @@ fun MultiviewTile(
     channel: Channel?,
     gameTitle: String?,
     isSoundActive: Boolean,
+    isPlaybackEnabled: Boolean,
     focusRequester: FocusRequester,
-    onClick: () -> Unit,
+    onStartPlayback: () -> Unit,
+    onOpenMenu: () -> Unit,
     onTryBackup: () -> Boolean = { false },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+
+    var isReleased by remember { mutableStateOf(false) }
 
     // Dedicated status state for this tile
     var playerStatus by remember { mutableStateOf("Initializing") }
@@ -362,37 +410,73 @@ fun MultiviewTile(
     var statusDetailText by remember { mutableStateOf("") }
     var isTryingBackup by remember { mutableStateOf(false) }
 
-    // Dedicated independent ExoPlayer for this tile, released only when the tile channel changes or screen leaves composition
-    val exoPlayer = remember(tileIndex, channel?.id) {
+    // (1) & (2) Independent ExoPlayer for this tile, created ONLY when playback is enabled.
+    // Capped: DefaultTrackSelector (640x360, 1.2Mbps for non-sound), small buffer (2s min, 5s max),
+    // and DefaultRenderersFactory with decoder fallback.
+    val exoPlayer = remember(tileIndex, channel?.id, isPlaybackEnabled) {
         val streamUrl = channel?.streamUrl
-        if (streamUrl.isNullOrBlank()) {
+        if (!isPlaybackEnabled || streamUrl.isNullOrBlank()) {
             null
         } else {
-            val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-                .setUserAgent("Mozilla/5.0 (Linux; Android 14; Fire TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                .setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(8000)
-                .setReadTimeoutMs(8000)
-
-            val mediaSourceFactory = DefaultMediaSourceFactory(httpDataSourceFactory)
-
-            ExoPlayer.Builder(context)
-                .setMediaSourceFactory(mediaSourceFactory)
-                .setWakeMode(C.WAKE_MODE_NETWORK)
-                .build().apply {
-                    repeatMode = Player.REPEAT_MODE_OFF
-                    volume = if (isSoundActive) 1.0f else 0.0f
-                    val mediaItem = MediaItem.Builder().setUri(Uri.parse(streamUrl)).build()
-                    setMediaItem(mediaItem)
-                    prepare()
-                    playWhenReady = true
+            try {
+                val renderersFactory = DefaultRenderersFactory(context).apply {
+                    setEnableDecoderFallback(true)
                 }
+
+                val trackSelector = DefaultTrackSelector(context).apply {
+                    if (!isSoundActive) {
+                        parameters = buildUponParameters()
+                            .setMaxVideoSize(640, 360)
+                            .setMaxVideoBitrate(1_200_000)
+                            .build()
+                    }
+                }
+
+                val loadControl = DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                        /* minBufferMs = */ 2000,
+                        /* maxBufferMs = */ 5000,
+                        /* bufferForPlaybackMs = */ 1000,
+                        /* bufferForPlaybackAfterRebufferMs = */ 1500
+                    )
+                    .setBackBuffer(
+                        /* backBufferDurationMs = */ 0,
+                        /* retainBackBufferFromKeyframe = */ false
+                    )
+                    .build()
+
+                val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+                    .setUserAgent("Mozilla/5.0 (Linux; Android 14; Fire TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    .setAllowCrossProtocolRedirects(true)
+                    .setConnectTimeoutMs(8000)
+                    .setReadTimeoutMs(8000)
+
+                val mediaSourceFactory = DefaultMediaSourceFactory(httpDataSourceFactory)
+
+                ExoPlayer.Builder(context, renderersFactory)
+                    .setMediaSourceFactory(mediaSourceFactory)
+                    .setTrackSelector(trackSelector)
+                    .setLoadControl(loadControl)
+                    .setWakeMode(C.WAKE_MODE_NETWORK)
+                    .build().apply {
+                        repeatMode = Player.REPEAT_MODE_OFF
+                        volume = if (isSoundActive) 1.0f else 0.0f
+                        val mediaItem = MediaItem.Builder().setUri(Uri.parse(streamUrl)).build()
+                        setMediaItem(mediaItem)
+                        prepare()
+                        playWhenReady = true
+                    }
+            } catch (e: Exception) {
+                Log.e("MultiviewTile", "Error creating ExoPlayer for tile $tileIndex", e)
+                null
+            }
         }
     }
 
-    // Track playback state & errors, and release player when channel changes or leaves composition
-    DisposableEffect(exoPlayer) {
-        if (exoPlayer != null) {
+    // (4) Track playback state & errors, and release player when channel changes,
+    // tile disabled, or screen leaves composition or activity stops
+    DisposableEffect(exoPlayer, lifecycleOwner) {
+        if (exoPlayer != null && !isReleased) {
             val listener = object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
                     statusIsError = true
@@ -433,19 +517,62 @@ fun MultiviewTile(
                 }
             }
 
-            exoPlayer.addListener(listener)
+            try {
+                exoPlayer.addListener(listener)
+            } catch (e: Exception) {
+                // Ignore
+            }
+
+            val lifecycleObserver = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                    try {
+                        isReleased = true
+                        exoPlayer.stop()
+                        exoPlayer.release()
+                    } catch (e: Exception) {
+                        // Ignore
+                    }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
+
             onDispose {
-                exoPlayer.removeListener(listener)
-                exoPlayer.release()
+                lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
+                try {
+                    isReleased = true
+                    exoPlayer.removeListener(listener)
+                    exoPlayer.stop()
+                    exoPlayer.release()
+                } catch (e: Exception) {
+                    // Ignore
+                }
             }
         } else {
             onDispose { }
         }
     }
 
-    // Audio routing: Muted tiles use volume 0.0f, active tile uses 1.0f (never paused!)
-    LaunchedEffect(exoPlayer, isSoundActive) {
-        exoPlayer?.volume = if (isSoundActive) 1.0f else 0.0f
+    // Audio & Track quality routing
+    LaunchedEffect(exoPlayer, isSoundActive, isReleased) {
+        if (!isReleased && exoPlayer != null) {
+            try {
+                exoPlayer.volume = if (isSoundActive) 1.0f else 0.0f
+                val selector = exoPlayer.trackSelector as? DefaultTrackSelector
+                if (selector != null) {
+                    selector.parameters = selector.buildUponParameters().apply {
+                        if (!isSoundActive) {
+                            setMaxVideoSize(640, 360)
+                            setMaxVideoBitrate(1_200_000)
+                        } else {
+                            clearVideoSizeConstraints()
+                            setMaxVideoBitrate(Int.MAX_VALUE)
+                        }
+                    }.build()
+                }
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
     }
 
     // Reset status when channel changes
@@ -463,10 +590,9 @@ fun MultiviewTile(
     }
 
     // Watchdog: If stream errors or stalls in "Loading" for > 8 seconds, automatically try backup candidate channel
-    LaunchedEffect(channel?.id, playerStatus, statusIsError) {
-        if (channel != null && (statusIsError || playerStatus == "Loading")) {
+    LaunchedEffect(channel?.id, playerStatus, statusIsError, isPlaybackEnabled) {
+        if (isPlaybackEnabled && channel != null && (statusIsError || playerStatus == "Loading")) {
             delay(8000)
-            // If still stalling or errored after 8 seconds
             if (statusIsError || playerStatus == "Loading") {
                 isTryingBackup = true
                 playerStatus = "Trying backup channel"
@@ -497,15 +623,25 @@ fun MultiviewTile(
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = onClick
+                onClick = {
+                    if (channel != null && !isPlaybackEnabled) {
+                        onStartPlayback()
+                    } else {
+                        onOpenMenu()
+                    }
+                }
             )
     ) {
-        // Video View surface
-        if (channel != null && exoPlayer != null) {
+        // Video View surface, Still poster, or Empty state
+        if (channel != null && isPlaybackEnabled && exoPlayer != null) {
             AndroidView(
                 factory = { ctx ->
                     PlayerView(ctx).apply {
-                        this.player = exoPlayer
+                        try {
+                            if (!isReleased) this.player = exoPlayer
+                        } catch (e: Exception) {
+                            Log.e("MultiviewTile", "Error assigning player to PlayerView", e)
+                        }
                         useController = false
                         keepScreenOn = true
                         layoutParams = FrameLayout.LayoutParams(
@@ -515,11 +651,22 @@ fun MultiviewTile(
                     }
                 },
                 update = { view ->
-                    if (view.player != exoPlayer) {
-                        view.player = exoPlayer
+                    try {
+                        if (!isReleased && view.player != exoPlayer) {
+                            view.player = exoPlayer
+                        }
+                    } catch (e: Exception) {
+                        Log.e("MultiviewTile", "Error updating PlayerView", e)
                     }
                 },
                 modifier = Modifier.fillMaxSize()
+            )
+        } else if (channel != null && !isPlaybackEnabled) {
+            // (1) Still poster with channel name and 'Press OK to play' hint
+            StillPosterTileView(
+                channel = channel,
+                gameTitle = gameTitle,
+                isFocused = isFocused
             )
         } else {
             // No Channel found state
@@ -647,8 +794,8 @@ fun MultiviewTile(
             }
         }
 
-        // Status Overlay: Loading / Playing / Error text / Backup notification
-        if (channel != null) {
+        // Status Overlay: Loading / Playing / Error text / Backup notification (only when playback enabled)
+        if (channel != null && isPlaybackEnabled) {
             when {
                 isTryingBackup -> {
                     Box(
@@ -789,12 +936,93 @@ fun MultiviewTile(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Press OK for Action Menu",
+                    text = if (channel != null && !isPlaybackEnabled) "Press OK to play" else "Press OK for Action Menu",
                     color = TvOrangeFocus,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
+        }
+    }
+}
+
+@Composable
+fun StillPosterTileView(
+    channel: Channel,
+    gameTitle: String?,
+    isFocused: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF13151B)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(16.dp)
+        ) {
+            // Play Icon Pill with 'Press OK to play' hint
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(if (isFocused) TvOrangeFocus else Color(0x33FFFFFF))
+                    .border(
+                        width = 1.5.dp,
+                        color = if (isFocused) TvOrangeFocus else TvLimeAccent,
+                        shape = RoundedCornerShape(24.dp)
+                    )
+                    .padding(horizontal = 14.dp, vertical = 7.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Play",
+                        tint = if (isFocused) Color.Black else TvLimeAccent,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Press OK to play",
+                        color = if (isFocused) Color.Black else Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = channel.name,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            if (!gameTitle.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    text = gameTitle,
+                    color = TvTextSecondary,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Standby • Video Decoder Saved",
+                color = TvTextMuted,
+                fontSize = 10.sp
+            )
         }
     }
 }

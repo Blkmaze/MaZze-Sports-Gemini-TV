@@ -63,6 +63,7 @@ fun HomeScreen(
     onAddToMultiview: (String, List<Channel>) -> Int = { _, _ -> 1 },
     onWatchFullScreenChannel: (Channel) -> Unit = {},
     onFindChannel: (String) -> Unit = {},
+    isHeroPlayerActive: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -186,14 +187,29 @@ fun HomeScreen(
                         onClick = onExpandFullScreen
                     )
             ) {
-                // Video Player surface
-                TvStreamPlayer(
-                    channel = currentPlayingChannel,
-                    modifier = Modifier.fillMaxSize(),
-                    isSoundActive = true,
-                    isFullScreen = false,
-                    onNextChannel = onNextChannel
-                )
+                // Video Player surface (only active when on Home and not fullscreen)
+                if (isHeroPlayerActive && currentPlayingChannel != null) {
+                    TvStreamPlayer(
+                        channel = currentPlayingChannel,
+                        modifier = Modifier.fillMaxSize(),
+                        isSoundActive = true,
+                        isFullScreen = false,
+                        onNextChannel = onNextChannel
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(TvDarkSurface),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = currentPlayingChannel?.name ?: "No Channel Selected",
+                            color = TvTextSecondary,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
 
                 // Top score bar overlay
                 ScoreBarOverlay(
