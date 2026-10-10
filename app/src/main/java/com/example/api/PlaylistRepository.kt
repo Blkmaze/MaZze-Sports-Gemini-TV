@@ -185,6 +185,20 @@ class PlaylistRepository(
             client.newCall(req).execute().use { resp ->
                 if (resp.isSuccessful) {
                     val body = resp.body?.string() ?: return emptyList()
+                    val catMap = HashMap<String, String>()
+                    try {
+                        val catUrl = "$server/player_api.php?username=${config.xtreamUsername}&password=${config.xtreamPassword}&action=get_live_categories"
+                        val catReq = Request.Builder().url(catUrl).header("User-Agent", "MaZzeSportsTV/1.0").build()
+                        client.newCall(catReq).execute().use { cr ->
+                            if (cr.isSuccessful) {
+                                val ca = JSONArray(cr.body?.string() ?: "[]")
+                                for (k in 0 until ca.length()) {
+                                    val co = ca.optJSONObject(k) ?: continue
+                                    catMap[co.optString("category_id", "")] = co.optString("category_name", "")
+                                }
+                            }
+                        }
+                    } catch (e: Exception) { }
                     val array = JSONArray(body)
                     val list = mutableListOf<Channel>()
                     for (i in 0 until array.length()) {
@@ -192,7 +206,7 @@ class PlaylistRepository(
                         val streamId = obj.optString("stream_id", "")
                         val streamName = obj.optString("name", "Stream")
                         val streamIcon = obj.optString("stream_icon", null)
-                        val categoryName = obj.optString("category_name", "Live")
+                        val categoryName = obj.optString("category_name", "").ifEmpty { catMap[obj.optString("category_id", "")] ?: "Live" }
                         val isSport = isSportsChannel(streamName, categoryName)
 
                         val streamUrl = "$server/live/${config.xtreamUsername}/${config.xtreamPassword}/$streamId.m3u8"
