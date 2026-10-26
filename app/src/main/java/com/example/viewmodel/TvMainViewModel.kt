@@ -188,7 +188,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val list = playlistRepo.loadChannels()
                 _channels.value = list
-                // Do not auto-select or auto-play a channel on app launch
+                if (_currentPlayingChannel.value == null) {
+                    autoPickHeroChannel()
+                }
                 autoFillMultiviewTop20(forceAll = false)
             } catch (e: Throwable) {
                 // Keep existing channels if reload failed
@@ -366,6 +368,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
                 _games.value = gameList
                 _isOffline.value = false
                 _lastUpdatedTime.value = timeFormat.format(Date())
+                if (_currentPlayingChannel.value == null) {
+                    autoPickHeroChannel()
+                }
             }.onFailure {
                 _isOffline.value = true
             }
@@ -379,8 +384,205 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
             val result = espnRepo.fetchNcaaFootballAndRankings()
             result.onSuccess { data ->
                 _ncaaFootballData.value = data
+                if (_currentPlayingChannel.value == null) {
+                    autoPickHeroChannel()
+                }
             }
         } catch (e: Throwable) {}
+    }
+
+    private fun getMarqueeScore(game: Game): Int {
+        val nameLower = game.name.lowercase(Locale.ROOT)
+        val leagueLower = game.league.lowercase(Locale.ROOT)
+        val shortNameLower = game.shortName.lowercase(Locale.ROOT)
+        val combined = "$nameLower $leagueLower $shortNameLower"
+
+        return when {
+            combined.contains("monday night football") -> 1100
+            leagueLower == "nfl" -> 1000
+            combined.contains("world series") -> 950
+            leagueLower == "mlb" -> 900
+            combined.contains("wnba finals") -> 850
+            leagueLower == "wnba" -> 800
+            leagueLower == "cfb" || leagueLower.contains("college-football") || leagueLower.contains("cfb") -> 700
+            leagueLower == "nba" -> 600
+            leagueLower == "nhl" -> 500
+            else -> 100
+        }
+    }
+
+    fun getLiveGameChannels(channels: List<Channel>): List<Channel> {
+        val result = mutableListOf<Channel>()
+        val seenIds = mutableSetOf<String>()
+
+        val liveStandardGames = _games.value
+            .filter { it.state.equals("in", ignoreCase = true) }
+            .sortedByDescending { getMarqueeScore(it) }
+
+        for (game in liveStandardGames) {
+            val candidates = ChannelMatchingHelper.findCandidatesForGame(game, channels, seenIds)
+            for (ch in candidates) {
+                if (seenIds.add(ch.id)) {
+                    result.add(ch)
+                }
+            }
+        }
+
+        val liveNcaaGames = _ncaaFootballData.value.games
+            .filter { it.state.equals("in", ignoreCase = true) }
+
+        for (ncaaGame in liveNcaaGames) {
+            val candidates = ChannelMatchingHelper.findCandidatesForNcaaGame(ncaaGame, channels, seenIds)
+            for (ch in candidates) {
+                if (seenIds.add(ch.id)) {
+                    result.add(ch)
+                }
+            }
+        }
+
+        return result
+    }
+
+    private fun findFallbackSportsChannel(channels: List<Channel>): Channel? {
+        if (channels.isEmpty()) return null
+
+        // 1. ESPN (main, excluding ESPN2, ESPNews, ESPNU)
+        val espn = channels.firstOrNull { ch ->
+            val n = ch.name.lowercase(Locale.ROOT)
+            n.contains("espn") && !n.contains("espn2") && !n.contains("espn 2") &&
+                    !n.contains("espnews") && !n.contains("espn news") &&
+                    !n.contains("espnu") && !n.contains("espn u") && !n.contains("espn+")
+        }
+        if (espn != null) return espn
+
+        // 2. ESPN2
+        val espn2 = channels.firstOrNull { ch ->
+            val n = ch.name.lowercase(Locale.ROOT)
+            n.contains("espn2") || n.contains("espn 2")
+        }
+        if (espn2 != null) return espn2
+
+        // 3. ESPNews
+        val espnews = channels.firstOrNull { ch ->
+            val n = ch.name.lowercase(Locale.ROOT)
+            n.contains("espnews") || n.contains("espn news")
+        }
+        if (espnews != null) return espnews
+
+        // 4. ESPNU
+        val espnu = channels.firstOrNull { ch ->
+            val n = ch.name.lowercase(Locale.ROOT)
+            n.contains("espnu") || n.contains("espn u")
+        }
+        if (espnu != null) return espnu
+
+        // 5. Any ESPN channel
+        val anyEspn = channels.firstOrNull { ch ->
+            ch.name.lowercase(Locale.ROOT).contains("espn")
+        }
+        if (anyEspn != null) return anyEspn
+
+        // 6. Other major sports networks
+        val otherSports = listOf("fs1", "fox sports 1", "sec network", "nfl network", "mlb network", "nba tv", "nhl network", "tnt", "tbs")
+        for (pattern in otherSports) {
+            val found = channels.firstOrNull { it.name.lowercase(Locale.ROOT).contains(pattern) }
+            if (found != null) return found
+        }
+
+        return channels.firstOrNull { it.isSports } ?: channels.firstOrNull()
+    }
+
+    fun autoPickHeroChannel(force: Boolean = false) {
+        val currentChannels = _channels.value
+        if (currentChannels.isEmpty()) return
+        if (!force && _currentPlayingChannel.value != null) return
+
+        val liveChannels = getLiveGameChannels(currentChannels)
+        val picked = liveChannels.firstOrNull() ?: findFallbackSportsChannel(currentChannels)
+        if (picked != null) {
+            _currentPlayingChannel.value = picked
+        }
+    }
+
+    fun getCuratedChannelList(): List<Channel> {
+        val allChannels = _channels.value
+        if (allChannels.isEmpty()) return emptyList()
+
+        val result = mutableListOf<Channel>()
+        val seenIds = mutableSetOf<String>()
+
+        // 1. Live game channels first (ordered by marquee event / live status)
+        val liveChannels = getLiveGameChannels(allChannels)
+        for (ch in liveChannels) {
+            if (seenIds.add(ch.id)) {
+                result.add(ch)
+            }
+        }
+
+        // 2. ESPN / ESPNews style channels
+        val networkPriorities = listOf(
+            listOf("espn2", "espn 2"),
+            listOf("espnews", "espn news"),
+            listOf("espnu", "espn u"),
+            listOf("sec network", "secn"),
+            listOf("acc network", "accn"),
+            listOf("fs1", "fox sports 1"),
+            listOf("fs2", "fox sports 2"),
+            listOf("mlb network"),
+            listOf("nfl network"),
+            listOf("nba tv"),
+            listOf("nhl network"),
+            listOf("tnt"),
+            listOf("tbs"),
+            listOf("cbs sports", "cbssn"),
+            listOf("nbc sports")
+        )
+
+        val espnMain = allChannels.filter { ch ->
+            val n = ch.name.lowercase(Locale.ROOT)
+            n.contains("espn") && !n.contains("espn2") && !n.contains("espn 2") &&
+                    !n.contains("espnews") && !n.contains("espn news") &&
+                    !n.contains("espnu") && !n.contains("espn u") && !n.contains("espn+")
+        }
+        for (ch in espnMain) {
+            if (seenIds.add(ch.id)) result.add(ch)
+        }
+
+        for (patterns in networkPriorities) {
+            val matches = allChannels.filter { ch ->
+                val n = ch.name.lowercase(Locale.ROOT)
+                patterns.any { n.contains(it) }
+            }
+            for (ch in matches) {
+                if (seenIds.add(ch.id)) result.add(ch)
+            }
+        }
+
+        for (ch in allChannels) {
+            if (ch.isSports && seenIds.add(ch.id)) {
+                result.add(ch)
+            }
+        }
+
+        return result.ifEmpty { allChannels }
+    }
+
+    fun cycleNextChannel() {
+        val pool = getCuratedChannelList()
+        if (pool.isEmpty()) return
+        val current = _currentPlayingChannel.value
+        val currIdx = pool.indexOfFirst { it.id == current?.id }
+        val nextIdx = if (currIdx >= 0) (currIdx + 1) % pool.size else 0
+        _currentPlayingChannel.value = pool[nextIdx]
+    }
+
+    fun cyclePreviousChannel() {
+        val pool = getCuratedChannelList()
+        if (pool.isEmpty()) return
+        val current = _currentPlayingChannel.value
+        val currIdx = pool.indexOfFirst { it.id == current?.id }
+        val prevIdx = if (currIdx > 0) currIdx - 1 else pool.size - 1
+        _currentPlayingChannel.value = pool[prevIdx]
     }
 
     fun selectGameForSquares(game: Game) {

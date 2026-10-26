@@ -109,24 +109,13 @@ class MainActivity : ComponentActivity() {
 
                 if (isFullScreen) {
                     // Full screen player mode
-                    val channelIndex = channels.indexOfFirst { it.id == currentPlayingChannel?.id }
                     TvStreamPlayer(
                         channel = currentPlayingChannel,
                         isSoundActive = true,
                         isFullScreen = true,
                         onBack = { viewModel.setFullScreenPlayer(false) },
-                        onNextChannel = {
-                            if (channels.isNotEmpty()) {
-                                val nextIdx = if (channelIndex >= 0) (channelIndex + 1) % channels.size else 0
-                                channels.getOrNull(nextIdx)?.let { viewModel.setPlayingChannel(it) }
-                            }
-                        },
-                        onPreviousChannel = {
-                            if (channels.isNotEmpty()) {
-                                val prevIdx = if (channelIndex > 0) channelIndex - 1 else channels.size - 1
-                                channels.getOrNull(prevIdx)?.let { viewModel.setPlayingChannel(it) }
-                            }
-                        },
+                        onNextChannel = { viewModel.cycleNextChannel() },
+                        onPreviousChannel = { viewModel.cyclePreviousChannel() },
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
@@ -175,13 +164,7 @@ class MainActivity : ComponentActivity() {
                                         },
                                         onToggleSpoiler = { viewModel.toggleSpoilerReveal(it) },
                                         onExpandFullScreen = { viewModel.setFullScreenPlayer(true) },
-                                        onNextChannel = {
-                                            if (channels.isNotEmpty()) {
-                                                val currIdx = channels.indexOfFirst { it.id == currentPlayingChannel?.id }
-                                                val nextIdx = if (currIdx >= 0) (currIdx + 1) % channels.size else 0
-                                                channels.getOrNull(nextIdx)?.let { viewModel.setPlayingChannel(it) }
-                                            }
-                                        },
+                                        onNextChannel = { viewModel.cycleNextChannel() },
                                         onNavigateToSettings = { viewModel.setScreen(4) },
                                         onAddToMultiview = { title, candidates ->
                                             viewModel.addGameToMultiview(title, candidates)

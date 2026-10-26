@@ -27,9 +27,10 @@ class EspnScoreboardRepository(
 
     val leagues: List<LeagueTarget> = listOf(
         LeagueTarget("football", "nfl", "NFL"),
+        LeagueTarget("baseball", "mlb", "MLB"),
+        LeagueTarget("basketball", "wnba", "WNBA"),
         LeagueTarget("basketball", "nba", "NBA"),
         LeagueTarget("hockey", "nhl", "NHL"),
-        LeagueTarget("baseball", "mlb", "MLB"),
         LeagueTarget("football", "college-football", "CFB"),
         LeagueTarget("basketball", "mens-college-basketball", "NCAAM"),
         LeagueTarget("soccer", "eng.1", "EPL"),

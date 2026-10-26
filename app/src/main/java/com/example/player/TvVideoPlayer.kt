@@ -62,43 +62,36 @@ fun TvStreamPlayer(
     var showOsd by remember { mutableStateOf(false) }
     var retryCount by remember { mutableIntStateOf(0) }
 
-    val exoPlayer = remember(context, channel?.streamUrl, retryCount) {
-        val streamUrl = channel?.streamUrl
-        if (streamUrl.isNullOrBlank()) {
-            null
-        } else {
-            try {
-                val renderersFactory = DefaultRenderersFactory(context).apply {
-                    setEnableDecoderFallback(true)
-                }
-                val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-                    .setUserAgent("Mozilla/5.0 (Linux; Android 14; Fire TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                    .setAllowCrossProtocolRedirects(true)
-                    .setConnectTimeoutMs(10000)
-                    .setReadTimeoutMs(10000)
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    var isReleased by remember { mutableStateOf(false) }
 
-                val mediaSourceFactory = DefaultMediaSourceFactory(httpDataSourceFactory)
-
-                ExoPlayer.Builder(context, renderersFactory)
-                    .setMediaSourceFactory(mediaSourceFactory)
-                    .setWakeMode(C.WAKE_MODE_NETWORK)
-                    .build().apply {
-                        repeatMode = Player.REPEAT_MODE_OFF
-                        val uri = Uri.parse(streamUrl)
-                        val mediaItem = MediaItem.Builder().setUri(uri).build()
-                        setMediaItem(mediaItem)
-                        volume = if (isSoundActive) 1.0f else 0.0f
-                        prepare()
-                        playWhenReady = true
-                    }
-            } catch (e: Exception) {
-                null
+    val exoPlayer = remember(context) {
+        try {
+            val renderersFactory = DefaultRenderersFactory(context).apply {
+                setEnableDecoderFallback(true)
             }
+            val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+                .setUserAgent("Mozilla/5.0 (Linux; Android 14; Fire TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(10000)
+                .setReadTimeoutMs(10000)
+
+            val mediaSourceFactory = DefaultMediaSourceFactory(httpDataSourceFactory)
+
+            ExoPlayer.Builder(context, renderersFactory)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .setWakeMode(C.WAKE_MODE_NETWORK)
+                .build().apply {
+                    repeatMode = Player.REPEAT_MODE_OFF
+                    playWhenReady = true
+                }
+        } catch (e: Exception) {
+            null
         }
     }
 
-    DisposableEffect(exoPlayer) {
-        if (exoPlayer != null) {
+    DisposableEffect(exoPlayer, lifecycleOwner) {
+        if (exoPlayer != null && !isReleased) {
             val listener = object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
                     hasError = true
@@ -125,8 +118,23 @@ fun TvStreamPlayer(
                 // Ignore
             }
 
+            val lifecycleObserver = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                    try {
+                        isReleased = true
+                        exoPlayer.stop()
+                        exoPlayer.release()
+                    } catch (e: Exception) {
+                        // Ignore
+                    }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
+
             onDispose {
+                lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
                 try {
+                    isReleased = true
                     exoPlayer.removeListener(listener)
                     exoPlayer.stop()
                     exoPlayer.release()
@@ -140,11 +148,41 @@ fun TvStreamPlayer(
     }
 
     // Update volume when sound active state changes
-    LaunchedEffect(exoPlayer, isSoundActive) {
-        try {
-            exoPlayer?.volume = if (isSoundActive) 1.0f else 0.0f
-        } catch (e: Exception) {
-            // Ignore
+    LaunchedEffect(isSoundActive, isReleased) {
+        if (!isReleased && exoPlayer != null) {
+            try {
+                exoPlayer.volume = if (isSoundActive) 1.0f else 0.0f
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
+    }
+
+    // Update Media Item when channel or retryCount changes
+    LaunchedEffect(channel?.streamUrl, retryCount, isReleased) {
+        if (isReleased || exoPlayer == null) return@LaunchedEffect
+        val streamUrl = channel?.streamUrl
+        if (!streamUrl.isNullOrEmpty()) {
+            hasError = false
+            try {
+                val uri = Uri.parse(streamUrl)
+                val mediaItem = MediaItem.Builder()
+                    .setUri(uri)
+                    .build()
+                exoPlayer.setMediaItem(mediaItem)
+                exoPlayer.prepare()
+                exoPlayer.play()
+            } catch (e: Exception) {
+                hasError = true
+                errorMessage = e.localizedMessage ?: "Failed to open stream"
+            }
+        } else {
+            try {
+                exoPlayer.stop()
+                exoPlayer.clearMediaItems()
+            } catch (e: Exception) {
+                // Ignore
+            }
         }
     }
 
@@ -192,13 +230,12 @@ fun TvStreamPlayer(
                 } else false
             }
     ) {
-        val streamUrl = channel?.streamUrl
-        if (!streamUrl.isNullOrBlank() && exoPlayer != null) {
+        if (channel != null) {
             AndroidView(
                 factory = { ctx ->
                     PlayerView(ctx).apply {
                         try {
-                            player = exoPlayer
+                            if (!isReleased) player = exoPlayer
                         } catch (e: Exception) {
                             // Ignore
                         }
@@ -212,16 +249,9 @@ fun TvStreamPlayer(
                 },
                 update = { view ->
                     try {
-                        if (view.player != exoPlayer) {
+                        if (!isReleased && view.player != exoPlayer) {
                             view.player = exoPlayer
                         }
-                    } catch (e: Exception) {
-                        // Ignore
-                    }
-                },
-                onRelease = { view ->
-                    try {
-                        view.player = null
                     } catch (e: Exception) {
                         // Ignore
                     }
@@ -245,7 +275,7 @@ fun TvStreamPlayer(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = if (channel == null) "No channel selected" else "No stream URL available",
+                        text = "No channel selected",
                         color = TvTextSecondary,
                         fontSize = 14.sp
                     )
@@ -289,10 +319,7 @@ fun TvStreamPlayer(
                         TvFocusButton(
                             text = "Retry Stream",
                             icon = Icons.Default.Refresh,
-                            onClick = {
-                                hasError = false
-                                retryCount++
-                            }
+                            onClick = { retryCount++ }
                         )
                         TvFocusButton(
                             text = "Next Channel",

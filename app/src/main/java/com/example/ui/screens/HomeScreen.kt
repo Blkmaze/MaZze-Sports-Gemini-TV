@@ -2,8 +2,11 @@ package com.example.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -65,10 +68,10 @@ fun HomeScreen(
     val context = LocalContext.current
     var selectedGameActionMenu by remember { mutableStateOf<GameActionMenuData?>(null) }
 
-    // First-frame gate: never initialize video decoders/PlayerView on the very first frame
+    // First-frame gate: delay ~1500 ms after first frame before hero starts playing so launch does not stall
     var isFirstFramePassed by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        delay(300)
+        delay(1500)
         isFirstFramePassed = true
     }
 
@@ -125,36 +128,82 @@ fun HomeScreen(
 
         // 2. Hero Live Preview Section
         item {
+            val heroInteractionSource = remember { MutableInteractionSource() }
+            val isHeroFocused by heroInteractionSource.collectIsFocusedAsState()
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(280.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(TvDarkSurface)
+                    .border(
+                        width = if (isHeroFocused) 3.dp else 0.dp,
+                        color = if (isHeroFocused) TvOrangeFocus else Color.Transparent,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    .focusable(interactionSource = heroInteractionSource)
+                    .clickable(
+                        interactionSource = heroInteractionSource,
+                        indication = null
+                    ) {
+                        onExpandFullScreen()
+                    }
             ) {
-                val shouldPlayHero = false
-
-                // Safe Poster / Placeholder (video starts only when Fullscreen or Watch Live is selected)
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(TvDarkSurface),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.LiveTv,
-                            contentDescription = null,
-                            tint = TvOrangeFocus,
-                            modifier = Modifier.size(54.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = currentPlayingChannel?.name ?: "Select a Game or Channel to Preview",
-                            color = TvTextPrimary,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                if (channels.isEmpty()) {
+                    // While channels are loading, display loading message
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(TvDarkSurface),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(
+                                color = TvOrangeFocus,
+                                modifier = Modifier.size(36.dp),
+                                strokeWidth = 3.dp
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Loading live sports channels...",
+                                color = TvTextSecondary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                } else if (isFirstFramePassed && isHeroPlayerActive && currentPlayingChannel != null && !currentPlayingChannel.streamUrl.isNullOrBlank()) {
+                    TvStreamPlayer(
+                        channel = currentPlayingChannel,
+                        isSoundActive = true,
+                        isFullScreen = false,
+                        onNextChannel = onNextChannel,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    // Safe Poster / Placeholder (waiting for 1500ms delay or if no stream)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(TvDarkSurface),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.LiveTv,
+                                contentDescription = null,
+                                tint = TvOrangeFocus,
+                                modifier = Modifier.size(54.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = currentPlayingChannel?.name ?: "Select a Game or Channel to Preview",
+                                color = TvTextPrimary,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
 
@@ -170,7 +219,7 @@ fun HomeScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = currentPlayingChannel?.name ?: "No Channel Loaded",
+                            text = currentPlayingChannel?.name ?: if (channels.isEmpty()) "Loading channels..." else "No Channel Loaded",
                             color = Color.White,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
@@ -186,9 +235,9 @@ fun HomeScreen(
                     Row {
                         if (currentPlayingChannel != null) {
                             TvFocusButton(
-                                text = "Fullscreen",
+                                text = "Watch Full Screen",
                                 icon = Icons.Default.Fullscreen,
-                                onClick = onExpandFullScreen
+                                onClick = { onWatchFullScreenChannel(currentPlayingChannel) }
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             TvFocusButton(
