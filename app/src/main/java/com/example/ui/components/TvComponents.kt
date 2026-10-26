@@ -406,7 +406,7 @@ fun HotGameCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             // Header: League & Status / Schedule
             Row(
@@ -416,7 +416,7 @@ fun HotGameCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = game.league,
+                        text = if (game.network.isNotBlank()) game.league + " · " + game.network else game.league,
                         color = TvLimeAccent,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
@@ -449,7 +449,7 @@ fun HotGameCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             // Away Team
             TeamScoreRow(
@@ -458,7 +458,7 @@ fun HotGameCard(
                 score = if (isLive) game.awayScore else ""
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(2.dp))
 
             // Home Team
             TeamScoreRow(
@@ -466,40 +466,6 @@ fun HotGameCard(
                 teamLogo = game.homeTeam.logo,
                 score = if (isLive) game.homeScore else ""
             )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Footer: Network Badge and action hint
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (game.network.isNotBlank()) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color.White.copy(alpha = 0.12f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = game.network,
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                } else {
-                    Spacer(modifier = Modifier.width(1.dp))
-                }
-
-                Text(
-                    text = if (isLive) "Watch Live" else "Match Options",
-                    color = TvOrangeFocus,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
         }
     }
 }

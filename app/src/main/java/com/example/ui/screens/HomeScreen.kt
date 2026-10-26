@@ -141,11 +141,14 @@ fun HomeScreen(
             val isHeroFocused by heroInteractionSource.collectIsFocusedAsState()
 
 
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().height(260.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(185.dp)
+                    .fillMaxHeight()
+                    .aspectRatio(16f / 9f)
                     .clip(RoundedCornerShape(16.dp))
                     .background(TvDarkSurface)
                     .border(
@@ -226,17 +229,16 @@ fun HomeScreen(
                 } // end hero Box
 
                 // Controls & Info bar BELOW the preview so D-pad Down reaches the buttons
-                Row(
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.Black.copy(alpha = 0.7f))
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column {
                         Text(
                             text = currentPlayingChannel?.name ?: if (channels.isEmpty()) "Loading channels..." else "No Channel Loaded",
                             color = Color.White,
@@ -251,20 +253,21 @@ fun HomeScreen(
                             fontSize = 12.sp
                         )
                     }
-                    Row {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Column {
                         if (currentPlayingChannel != null) {
                             TvFocusButton(
                                 text = "Watch Full Screen",
                                 icon = Icons.Default.Fullscreen,
                                 onClick = { onWatchFullScreenChannel(currentPlayingChannel) }
                             )
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                             TvFocusButton(
                                 text = "Back",
                                 icon = Icons.Default.SkipPrevious,
                                 onClick = onPreviousChannel
                             )
-                            Spacer(modifier = Modifier.width(12.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                             TvFocusButton(
                                 text = "Next Channel",
                                 icon = Icons.Default.SkipNext,
