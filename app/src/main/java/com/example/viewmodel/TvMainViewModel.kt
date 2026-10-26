@@ -481,7 +481,8 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         // 4. WNBA Finals
-        val isWnbaFinals = league == "wnba" && (combined.contains("finals") || combined.contains("championship"))
+        // ESPN event names are only team names, so any WNBA game in October is the WNBA Finals
+        val isWnbaFinals = league == "wnba" && (combined.contains("finals") || combined.contains("championship") || startMonth == 10)
         if (isWnbaFinals) {
             score += 380_000L
         } else if (league == "wnba") {
