@@ -16,14 +16,11 @@ private val TvColorScheme = darkColorScheme(
     surface = TvDarkSurface,
     onSurface = TvTextPrimary,
     surfaceVariant = TvDarkCard,
-    onSurfaceVariant = TvTextSecondary,
-    outline = TvOrangeFocus
+    onSurfaceVariant = TvTextSecondary
 )
 
 @Composable
-fun MyApplicationTheme(
-    content: @Composable () -> Unit
-) {
+fun MyApplicationTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = TvColorScheme,
         typography = Typography,

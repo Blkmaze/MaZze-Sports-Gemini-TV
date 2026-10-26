@@ -2,16 +2,12 @@ package com.example.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -26,7 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import androidx.compose.ui.window.Dialog
 import com.example.api.ChannelMatchingHelper
 import com.example.model.Channel
 import com.example.model.Game
@@ -35,12 +31,12 @@ import com.example.model.NcaaGame
 import com.example.player.TvStreamPlayer
 import com.example.ui.components.*
 import com.example.ui.theme.*
+import kotlinx.coroutines.delay
 
 data class GameActionMenuData(
     val title: String,
-    val network: String,
-    val candidateChannels: List<Channel>,
-    val searchFilter: String
+    val candidates: List<Channel>,
+    val network: String
 )
 
 @Composable
@@ -53,36 +49,39 @@ fun HomeScreen(
     lastUpdatedTime: String,
     spoilerFree: Boolean,
     revealedGameIds: Set<String>,
+    isHeroPlayerActive: Boolean = true,
     onSelectGame: (Game) -> Unit = {},
     onSelectNcaaGame: (NcaaGame) -> Unit = {},
     onSelectNcaaTeam: (String) -> Unit = {},
-    onToggleSpoiler: (String) -> Unit,
-    onExpandFullScreen: () -> Unit,
+    onToggleSpoiler: (String) -> Unit = {},
+    onExpandFullScreen: () -> Unit = {},
     onNextChannel: () -> Unit = {},
-    onNavigateToSettings: () -> Unit,
-    onAddToMultiview: (String, List<Channel>) -> Int = { _, _ -> 1 },
+    onNavigateToSettings: () -> Unit = {},
+    onAddToMultiview: (String, List<Channel>) -> Int = { _, _ -> -1 },
     onWatchFullScreenChannel: (Channel) -> Unit = {},
     onFindChannel: (String) -> Unit = {},
-    isHeroPlayerActive: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var selectedGameActionMenu by remember { mutableStateOf<GameActionMenuData?>(null) }
 
-    val liveGames = remember(games) { games.filter { it.isLive } }
-    val upcomingGames = remember(games) { games.filter { it.isPre } }
-    val finalGames = remember(games) { games.filter { it.isFinal } }
-
-    val topLiveGame = liveGames.firstOrNull() ?: games.firstOrNull()
+    // First-frame gate: never initialize video decoders/PlayerView on the very first frame
+    var isFirstFramePassed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(300)
+        isFirstFramePassed = true
+    }
 
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+            .background(TvDarkBackground)
+            .padding(horizontal = 24.dp),
+        contentPadding = PaddingValues(bottom = 32.dp)
     ) {
-        // Status Bar at Top (Updated timestamp & offline badge)
+        // 1. Top Header Bar
         item {
+            Spacer(modifier = Modifier.height(16.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -95,562 +94,303 @@ fun HomeScreen(
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Black
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "LIVE HUB",
-                        color = TvOrangeFocus,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(TvDarkCardElevated)
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
+                    Spacer(modifier = Modifier.width(12.dp))
                     if (isOffline) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFFB91C1C))
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.WifiOff,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Offline (Cached Data)",
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        Text(
+                            text = "Offline Mode",
+                            color = TvLiveRed,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     } else {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(TvLimeAccent)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Synced: $lastUpdatedTime",
-                                color = TvTextSecondary,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
-
-                    if (channels.isEmpty()) {
-                        TvFocusButton(
-                            text = "Add Playlist",
-                            icon = Icons.Default.Add,
-                            onClick = onNavigateToSettings
+                        Text(
+                            text = "Updated: $lastUpdatedTime",
+                            color = TvTextMuted,
+                            fontSize = 12.sp
                         )
                     }
-
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     TvClock()
+                    Spacer(modifier = Modifier.width(16.dp))
+                    TvFocusButton(
+                        text = "Settings",
+                        icon = Icons.Default.Settings,
+                        onClick = onNavigateToSettings
+                    )
                 }
             }
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // 1. Large Live Preview of the top game playing matching channel
+        // 2. Hero Live Preview Section
         item {
-            val interactionSource = remember { MutableInteractionSource() }
-            val isFocused by interactionSource.collectIsFocusedAsState()
-
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(280.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(TvDarkCard)
-                    .border(
-                        width = if (isFocused) 3.dp else 1.dp,
-                        color = if (isFocused) TvOrangeFocus else TvDarkCardElevated,
-                        shape = RoundedCornerShape(16.dp)
-                    )
-                    .focusable(interactionSource = interactionSource)
-                    .clickable(
-                        interactionSource = interactionSource,
-                        indication = null,
-                        onClick = onExpandFullScreen
-                    )
+                    .background(TvDarkSurface)
             ) {
-                // Video Player surface (only active when on Home and not fullscreen)
-                if (isHeroPlayerActive && currentPlayingChannel != null) {
+                val shouldPlayHero = isFirstFramePassed &&
+                        isHeroPlayerActive &&
+                        currentPlayingChannel != null &&
+                        !currentPlayingChannel.streamUrl.isNullOrBlank()
+
+                if (shouldPlayHero) {
                     TvStreamPlayer(
                         channel = currentPlayingChannel,
-                        modifier = Modifier.fillMaxSize(),
-                        isSoundActive = true,
-                        isFullScreen = false,
-                        onNextChannel = onNextChannel
+                        isSoundActive = false,
+                        isFullScreen = false
                     )
                 } else {
+                    // Safe Poster / Placeholder
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(TvDarkSurface),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = currentPlayingChannel?.name ?: "No Channel Selected",
-                            color = TvTextSecondary,
-                            fontSize = 14.sp
-                        )
-                    }
-                }
-
-                // Top score bar overlay
-                ScoreBarOverlay(
-                    game = topLiveGame,
-                    channelTitle = currentPlayingChannel?.name ?: "Sports Broadcast",
-                    spoilerFree = spoilerFree,
-                    isSpoilerRevealed = topLiveGame?.let { revealedGameIds.contains(it.id) } ?: false,
-                    modifier = Modifier.align(Alignment.TopCenter)
-                )
-
-                // Click to expand HUD at bottom-right
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(12.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isFocused) TvOrangeFocus else Color(0xCC0D0D10))
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Fullscreen,
-                            contentDescription = null,
-                            tint = if (isFocused) Color.Black else Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "OK: Fullscreen",
-                            color = if (isFocused) Color.Black else Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-
-        // 2. Row of Live Game Score Cards
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Live Games",
-                            color = Color.White,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (liveGames.isNotEmpty()) {
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "${liveGames.size} in progress",
-                                color = TvLimeAccent,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-
-                    if (spoilerFree) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(
-                                imageVector = Icons.Default.VisibilityOff,
+                                imageVector = Icons.Default.LiveTv,
                                 contentDescription = null,
                                 tint = TvOrangeFocus,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(54.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "Spoiler-Free Active",
-                                color = TvOrangeFocus,
-                                fontSize = 11.sp,
+                                text = currentPlayingChannel?.name ?: "Select a Game or Channel to Preview",
+                                color = TvTextPrimary,
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
 
-                if (games.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(100.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(TvDarkCard),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Connecting to ESPN Live Scoreboard...",
-                            color = TvTextSecondary,
-                            fontSize = 13.sp
-                        )
-                    }
-                } else {
-                    // Show live games or recent games
-                    val displayGames = if (liveGames.isNotEmpty()) liveGames else games.take(8)
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        contentPadding = PaddingValues(end = 24.dp)
-                    ) {
-                        items(displayGames, key = { it.id }) { game ->
-                            GameScoreCard(
-                                game = game,
-                                spoilerFree = spoilerFree,
-                                isSpoilerRevealed = revealedGameIds.contains(game.id),
-                                onRevealToggle = { onToggleSpoiler(game.id) },
-                                onClick = {
-                                    onSelectGame(game)
-                                    val candidates = ChannelMatchingHelper.findCandidatesForGame(game, channels, limit = 3)
-                                    selectedGameActionMenu = GameActionMenuData(
-                                        title = "${game.awayTeam.displayName} vs ${game.homeTeam.displayName}",
-                                        network = game.network,
-                                        candidateChannels = candidates,
-                                        searchFilter = "${game.awayTeam.displayName} ${game.homeTeam.displayName}"
-                                    )
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3. Top 20 NCAA Football - SEC Focus Section
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                // Overlay Controls & Info
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter)
+                        .background(Color.Black.copy(alpha = 0.7f))
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Top 20 NCAA Football - SEC Focus",
+                            text = currentPlayingChannel?.name ?: "No Channel Loaded",
                             color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Black
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(TvLimeAccent)
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "SEC",
-                                color = Color.Black,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                        }
-                    }
-
-                    if (ncaaFootballData.lastUpdated.isNotBlank()) {
                         Text(
-                            text = "AP Poll & SEC • Synced ${ncaaFootballData.lastUpdated}",
-                            color = TvTextSecondary,
-                            fontSize = 11.sp
-                        )
-                    }
-                }
-
-                // Horizontal strip of focusable cards 'AP Top 20' with rank and team
-                if (ncaaFootballData.apTop20.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "AP Top 20",
-                                color = TvLimeAccent,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "• SEC teams highlighted in lime",
-                                color = TvTextMuted,
-                                fontSize = 10.sp
-                            )
-                        }
-
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            contentPadding = PaddingValues(end = 24.dp)
-                        ) {
-                            items(ncaaFootballData.apTop20, key = { it.teamId.ifEmpty { "rank_${it.rank}" } }) { rankItem ->
-                                ApTop20Card(
-                                    rankItem = rankItem,
-                                    onClick = {
-                                        onSelectNcaaTeam(rankItem.displayName.ifEmpty { rankItem.name })
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Vertically scrollable list of NCAA games
-                if (ncaaFootballData.games.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(72.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(TvDarkCard),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Loading Top 20 & SEC matchups from ESPN...",
-                            color = TvTextSecondary,
+                            text = currentPlayingChannel?.groupTitle ?: "Sports Hub",
+                            color = TvOrangeFocus,
                             fontSize = 12.sp
                         )
                     }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ncaaFootballData.games.forEach { ncaaGame ->
-                            NcaaGameRow(
-                                game = ncaaGame,
-                                onClick = {
-                                    onSelectNcaaGame(ncaaGame)
-                                    val awayR = if (ncaaGame.awayRank != null) "#${ncaaGame.awayRank} " else ""
-                                    val homeR = if (ncaaGame.homeRank != null) "#${ncaaGame.homeRank} " else ""
-                                    val title = "${awayR}${ncaaGame.awayTeam.displayName} vs ${homeR}${ncaaGame.homeTeam.displayName}"
-                                    val candidates = ChannelMatchingHelper.findCandidatesForNcaaGame(ncaaGame, channels, limit = 3)
-                                    selectedGameActionMenu = GameActionMenuData(
-                                        title = title,
-                                        network = ncaaGame.network,
-                                        candidateChannels = candidates,
-                                        searchFilter = "${ncaaGame.awayTeam.displayName} ${ncaaGame.homeTeam.displayName}"
-                                    )
-                                }
+                    Row {
+                        if (currentPlayingChannel != null) {
+                            TvFocusButton(
+                                text = "Fullscreen",
+                                icon = Icons.Default.Fullscreen,
+                                onClick = onExpandFullScreen
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            TvFocusButton(
+                                text = "Next Channel",
+                                icon = Icons.Default.SkipNext,
+                                onClick = onNextChannel
                             )
                         }
                     }
                 }
             }
+            Spacer(modifier = Modifier.height(24.dp))
         }
 
-        // 4. Up Next List
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // 3. AP Top 20 Football Rankings Row
+        if (ncaaFootballData.apTop20.isNotEmpty()) {
+            item {
                 Text(
-                    text = "Up Next & Today's Matchups",
-                    color = Color.White,
-                    fontSize = 16.sp,
+                    text = "AP Top 20 Rankings (SEC & Top Tier)",
+                    color = TvTextPrimary,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.Bold
                 )
-
-                if (upcomingGames.isEmpty() && finalGames.isEmpty()) {
-                    Text(
-                        text = "No additional games scheduled today",
-                        color = TvTextMuted,
-                        fontSize = 12.sp
-                    )
-                } else {
-                    val remainingGames = (upcomingGames + finalGames).take(10)
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        remainingGames.forEach { game ->
-                            UpNextGameRow(
-                                game = game,
-                                onClick = {
-                                    onSelectGame(game)
-                                    val candidates = ChannelMatchingHelper.findCandidatesForGame(game, channels, limit = 3)
-                                    selectedGameActionMenu = GameActionMenuData(
-                                        title = "${game.awayTeam.displayName} vs ${game.homeTeam.displayName}",
-                                        network = game.network,
-                                        candidateChannels = candidates,
-                                        searchFilter = "${game.awayTeam.displayName} ${game.homeTeam.displayName}"
-                                    )
-                                }
-                            )
-                        }
+                Spacer(modifier = Modifier.height(10.dp))
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(ncaaFootballData.apTop20) { rankItem ->
+                        ApTop20Card(
+                            rankItem = rankItem,
+                            onClick = { onSelectNcaaTeam(rankItem.displayName) }
+                        )
                     }
                 }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+
+        // 4. Live & Upcoming Scoreboard Row
+        item {
+            Text(
+                text = "Live & Scheduled Sports",
+                color = TvTextPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            if (games.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(80.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(TvDarkSurface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Loading scoreboard...",
+                        color = TvTextSecondary,
+                        fontSize = 13.sp
+                    )
+                }
+            } else {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    items(games) { game ->
+                        GameScoreCard(
+                            game = game,
+                            spoilerFree = spoilerFree,
+                            isSpoilerRevealed = revealedGameIds.contains(game.id),
+                            onClick = {
+                                val candidates = ChannelMatchingHelper.findCandidatesForGame(game, channels)
+                                selectedGameActionMenu = GameActionMenuData(
+                                    title = "${game.awayTeam.displayName} @ ${game.homeTeam.displayName}",
+                                    candidates = candidates,
+                                    network = game.network
+                                )
+                            },
+                            onToggleSpoiler = { onToggleSpoiler(game.id) }
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+
+        // 5. NCAA Top Matchups List
+        if (ncaaFootballData.games.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Featured NCAA Games",
+                    color = TvTextPrimary,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+            items(ncaaFootballData.games.take(15)) { ncaaGame ->
+                NcaaGameRow(
+                    game = ncaaGame,
+                    onClick = {
+                        val candidates = ChannelMatchingHelper.findCandidatesForNcaaGame(ncaaGame, channels)
+                        selectedGameActionMenu = GameActionMenuData(
+                            title = "${ncaaGame.awayTeam.displayName} @ ${ncaaGame.homeTeam.displayName}",
+                            candidates = candidates,
+                            network = ncaaGame.network
+                        )
+                    },
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
             }
         }
     }
 
-    // Game Action Menu Dialog (Watch Full Screen, Add to Multiview, Find Channel)
-    if (selectedGameActionMenu != null) {
-        val menuData = selectedGameActionMenu!!
-        AlertDialog(
-            onDismissRequest = { selectedGameActionMenu = null },
-            containerColor = TvDarkCard,
-            shape = RoundedCornerShape(16.dp),
-            title = {
+    // Game Action Dialog (Fullscreen, Add to Multiview, Search channels)
+    selectedGameActionMenu?.let { menuData ->
+        Dialog(onDismissRequest = { selectedGameActionMenu = null }) {
+            Box(
+                modifier = Modifier
+                    .width(480.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(TvDarkSurface)
+                    .padding(24.dp)
+            ) {
                 Column {
                     Text(
                         text = menuData.title,
                         color = Color.White,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = if (menuData.network.isNotBlank() && menuData.network != "TV") "Broadcast: ${menuData.network}" else "Sports Broadcast",
-                        color = TvLimeAccent,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    if (menuData.candidateChannels.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(2.dp))
+                    if (menuData.network.isNotBlank()) {
                         Text(
-                            text = "Matched Channel: ${menuData.candidateChannels.first().name}",
-                            color = TvTextSecondary,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            text = "Broadcast: ${menuData.network}",
+                            color = TvLimeAccent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Button 1: Watch Full Screen
-                    MultiviewMenuButton(
-                        text = "Watch Full Screen",
-                        icon = Icons.Default.Fullscreen,
-                        autoFocus = true,
-                        onClick = {
-                            val targetChannel = menuData.candidateChannels.firstOrNull()
-                            selectedGameActionMenu = null
-                            if (targetChannel != null) {
-                                onWatchFullScreenChannel(targetChannel)
-                            } else {
-                                Toast.makeText(context, "No channel found - searching channels", Toast.LENGTH_SHORT).show()
-                                onFindChannel(menuData.searchFilter)
-                            }
-                        }
-                    )
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    // Button 2: Add to Multiview
-                    MultiviewMenuButton(
+                    val topCandidate = menuData.candidates.firstOrNull()
+                    if (topCandidate != null) {
+                        TvFocusButton(
+                            text = "Watch Live (${topCandidate.name})",
+                            icon = Icons.Default.PlayArrow,
+                            isPrimary = true,
+                            onClick = {
+                                selectedGameActionMenu = null
+                                onWatchFullScreenChannel(topCandidate)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    TvFocusButton(
                         text = "Add to Multiview",
-                        icon = Icons.Default.Dashboard,
+                        icon = Icons.Default.GridView,
                         onClick = {
-                            val candidates = menuData.candidateChannels
-                            val tileIndex = onAddToMultiview(menuData.title, candidates)
-                            Toast.makeText(context, "Added to Multiview tile $tileIndex", Toast.LENGTH_SHORT).show()
                             selectedGameActionMenu = null
-                        }
+                            val slot = onAddToMultiview(menuData.title, menuData.candidates)
+                            val msg = if (slot >= 0) "Added to Multiview Tile ${slot + 1}" else "Multiview updated"
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.fillMaxWidth()
                     )
 
-                    // Button 3: Find Channel
-                    MultiviewMenuButton(
-                        text = "Find Channel",
-                        icon = Icons.Default.Search,
-                        onClick = {
-                            selectedGameActionMenu = null
-                            onFindChannel(menuData.searchFilter)
-                        }
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (menuData.network.isNotBlank()) {
+                        TvFocusButton(
+                            text = "Search '${menuData.network}' Channels",
+                            icon = Icons.Default.Search,
+                            onClick = {
+                                selectedGameActionMenu = null
+                                onFindChannel(menuData.network)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    TvFocusButton(
+                        text = "Close",
+                        onClick = { selectedGameActionMenu = null },
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
-            },
-            confirmButton = {
-                TvFocusButton(
-                    text = "Close",
-                    onClick = { selectedGameActionMenu = null }
-                )
             }
-        )
-    }
-}
-
-@Composable
-fun UpNextGameRow(
-    game: Game,
-    onClick: () -> Unit
-) {
-    TvFocusCard(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp)
-    ) { isFocused ->
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            // League badge & teams
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = game.league,
-                    color = TvLimeAccent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.width(50.dp)
-                )
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // Away Team
-                Text(
-                    text = game.awayTeam.displayName,
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Text(
-                    text = " @ ",
-                    color = TvTextMuted,
-                    fontSize = 12.sp
-                )
-
-                // Home Team
-                Text(
-                    text = game.homeTeam.displayName,
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // Status or Time
-            Text(
-                text = if (game.isFinal) "FINAL: ${game.awayScore} - ${game.homeScore}" else game.statusDetail,
-                color = if (game.isFinal) TvTextMuted else TvTextSecondary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold
-            )
         }
     }
 }

@@ -1,6 +1,5 @@
 package com.example.ui.screens
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,8 +18,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -28,12 +25,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.model.Game
-import com.example.model.SquareCell
 import com.example.model.SquaresBoard
 import com.example.ui.components.TvFocusButton
 import com.example.ui.components.TvFocusCard
 import com.example.ui.theme.*
-import kotlin.random.Random
 
 @Composable
 fun SquaresScreen(
@@ -42,512 +37,296 @@ fun SquaresScreen(
     squaresBoard: SquaresBoard,
     showPaymentDialog: Boolean,
     paymentMethod: String,
-    onSelectGame: (Game) -> Unit,
-    onSelectPrice: (Int) -> Unit,
-    onToggleSquare: (Int, Int) -> Unit,
-    onOpenPayment: (String) -> Unit,
-    onClosePayment: () -> Unit,
-    onOpenBrowser: (String) -> Unit,
+    onSelectGame: (Game) -> Unit = {},
+    onSetPrice: (Int) -> Unit = {},
+    onSelectPrice: (Int) -> Unit = onSetPrice,
+    onToggleSquare: (Int, Int) -> Unit = { _, _ -> },
+    onOpenPaymentQr: (String) -> Unit = {},
+    onOpenPayment: (String) -> Unit = onOpenPaymentQr,
+    onClosePaymentQr: () -> Unit = {},
+    onClosePayment: () -> Unit = onClosePaymentQr,
+    onOpenLink: (String) -> Unit = {},
+    onOpenBrowser: (String) -> Unit = onOpenLink,
     modifier: Modifier = Modifier
 ) {
-    val totalCost = squaresBoard.userSquaresCount * squaresBoard.pricePerSquare
+    val handleSetPrice: (Int) -> Unit = { p -> onSelectPrice(p); onSetPrice(p) }
+    val handleOpenPayment: (String) -> Unit = { m -> onOpenPayment(m); onOpenPaymentQr(m) }
+    val handleClosePayment: () -> Unit = { onClosePayment(); onClosePaymentQr() }
+    val handleOpenBrowser: (String) -> Unit = { l -> onOpenBrowser(l); onOpenLink(l) }
+    val prices = listOf(5, 10, 20, 50)
 
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .background(TvDarkBackground)
+            .padding(20.dp),
+        contentPadding = PaddingValues(bottom = 32.dp)
     ) {
-        // 1. Top Section: Game Picker for Today's Real Games
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "10x10 Super Squares Contest",
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(
-                            text = "Refundable if the board does not fill",
-                            color = TvLimeAccent,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        com.example.ui.components.TvClock()
-                    }
-                }
-
-                Text(
-                    text = "Select a Game to Play Squares:",
-                    color = TvTextSecondary,
-                    fontSize = 12.sp
-                )
-
-                if (games.isEmpty()) {
-                    Text(
-                        text = "Loading today's ESPN matchups...",
-                        color = TvTextMuted,
-                        fontSize = 12.sp
-                    )
-                } else {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(games, key = { it.id }) { game ->
-                            val isSelected = selectedGame?.id == game.id
-                            TvFocusCard(
-                                onClick = { onSelectGame(game) },
-                                modifier = Modifier
-                                    .width(180.dp)
-                                    .height(64.dp),
-                                containerColor = if (isSelected) TvDarkCardElevated else TvDarkCard,
-                                focusedBorderColor = TvOrangeFocus
-                            ) { isFocused ->
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(8.dp),
-                                    verticalArrangement = Arrangement.Center
-                                ) {
-                                    Text(
-                                        text = "${game.league}: ${game.awayTeam.abbreviation} vs ${game.homeTeam.abbreviation}",
-                                        color = if (isSelected) TvOrangeFocus else Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp
-                                    )
-                                    Text(
-                                        text = if (game.isLive) "LIVE: ${game.awayScore}-${game.homeScore}" else game.statusDetail,
-                                        color = if (game.isLive) TvLimeAccent else TvTextMuted,
-                                        fontSize = 10.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. Contest Control Bar (Price selector, % sold status, count & total)
+        // Header
         item {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(TvDarkCard)
-                    .padding(14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Price selector
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "Price / Square:",
-                        color = TvTextSecondary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    listOf(5, 10, 20).forEach { price ->
-                        val isPriceSelected = squaresBoard.pricePerSquare == price
-                        TvFocusButton(
-                            text = "$$price",
-                            isPrimary = isPriceSelected,
-                            onClick = { onSelectPrice(price) }
-                        )
-                    }
-                }
-
-                // 75% Fill Progress & Numbers Lock Indicator
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = "${squaresBoard.percentFilled}% Filled (${squaresBoard.totalTakenCount}/100)",
-                            color = if (squaresBoard.isLockedAndDrawn) TvLimeAccent else TvOrangeFocus,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = if (squaresBoard.isLockedAndDrawn) "Numbers Drawn at Random!" else "Numbers reveal at 75% filled (?)",
-                            color = TvTextMuted,
-                            fontSize = 10.sp
-                        )
-                    }
-                }
-
-                // User's tally & Total
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = "Your Squares: ${squaresBoard.userSquaresCount}",
-                            color = TvOrangeFocus,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Total: $$totalCost",
-                            color = Color.White,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Black
-                        )
-                    }
-                }
-            }
-        }
-
-        // 3. The 10x10 Squares Grid
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(TvDarkSurface)
-                    .padding(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Team Labels
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "COLUMNS: ${selectedGame?.awayTeam?.displayName ?: "Away Team"} Digits (0-9)",
-                        color = TvLimeAccent,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Grid Container
-                Box(contentAlignment = Alignment.Center) {
-                    Column {
-                        // Top Header Row: Away Team Digits (? or numbers)
-                        Row {
-                            // Blank Corner Box for Row Header label
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .padding(2.dp)
-                                    .background(TvDarkCardElevated, RoundedCornerShape(4.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "HOME",
-                                    color = TvOrangeFocus,
-                                    fontSize = 8.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
-                            // 10 Column Headers
-                            for (c in 0..9) {
-                                val digitText = squaresBoard.awayNumbers?.getOrNull(c)?.toString() ?: "?"
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .padding(2.dp)
-                                        .background(
-                                            if (squaresBoard.isLockedAndDrawn) TvLimeAccentMuted else TvDarkCard,
-                                            RoundedCornerShape(4.dp)
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = digitText,
-                                        color = if (squaresBoard.isLockedAndDrawn) TvLimeAccent else TvOrangeFocus,
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 13.sp
-                                    )
-                                }
-                            }
-                        }
-
-                        // 10 Rows
-                        for (r in 0..9) {
-                            Row {
-                                // Row Header: Home Team Digit (? or numbers)
-                                val rowDigitText = squaresBoard.homeNumbers?.getOrNull(r)?.toString() ?: "?"
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .padding(2.dp)
-                                        .background(
-                                            if (squaresBoard.isLockedAndDrawn) TvLimeAccentMuted else TvDarkCard,
-                                            RoundedCornerShape(4.dp)
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = rowDigitText,
-                                        color = if (squaresBoard.isLockedAndDrawn) TvLimeAccent else TvOrangeFocus,
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 13.sp
-                                    )
-                                }
-
-                                // 10 Cell Columns
-                                for (c in 0..9) {
-                                    val cell = squaresBoard.cells.find { it.row == r && it.col == c }
-                                    SquareGridCell(
-                                        cell = cell,
-                                        onToggle = { onToggleSquare(r, c) }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Payment Buttons Section
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(TvDarkCard)
-                    .padding(16.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
                     Text(
-                        text = "Ready to claim your squares?",
+                        text = "Sports Squares (10x10 Pool)",
                         color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Refundable if the board does not fill • No payments inside the app",
-                        color = TvTextMuted,
-                        fontSize = 11.sp
-                    )
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    TvFocusButton(
-                        text = "Pay with Cash App",
-                        isPrimary = true,
-                        onClick = { onOpenPayment("Cash App") }
-                    )
-                    TvFocusButton(
-                        text = "Pay with PayPal",
-                        onClick = { onOpenPayment("PayPal") }
-                    )
-                    TvFocusButton(
-                        text = "Pay with Card",
-                        onClick = { onOpenPayment("Credit Card") }
-                    )
-                }
-            }
-        }
-    }
-
-    // 5. Payment QR Code Dialog (opens https://parlaypro-squares.netlify.app)
-    if (showPaymentDialog) {
-        Dialog(onDismissRequest = onClosePayment) {
-            Box(
-                modifier = Modifier
-                    .width(520.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(TvDarkSurface)
-                    .border(2.dp, TvOrangeFocus, RoundedCornerShape(18.dp))
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Text(
-                        text = "Complete Entry with $paymentMethod",
-                        color = Color.White,
-                        fontSize = 18.sp,
+                        fontSize = 20.sp,
                         fontWeight = FontWeight.Black
                     )
-
                     Text(
-                        text = "Scan QR code with your phone camera to pay on ParlayPro Squares:",
+                        text = "Pick a game and claim your squares for cash prizes",
                         color = TvTextSecondary,
-                        fontSize = 12.sp,
-                        textAlign = TextAlign.Center
+                        fontSize = 12.sp
                     )
-
-                    // Render Procedural QR Code Canvas
-                    Box(
-                        modifier = Modifier
-                            .size(180.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.White)
-                            .padding(12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        ProceduralQrCode(url = "https://parlaypro-squares.netlify.app")
-                    }
-
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "https://parlaypro-squares.netlify.app",
-                        color = TvLimeAccent,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        text = "Price: ",
+                        color = TvTextSecondary,
+                        fontSize = 13.sp
                     )
-
-                    // Refund notice
-                    Text(
-                        text = "Refund Note: 100% Refundable if the board does not fill before kickoff.",
-                        color = TvOrangeFocus,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Text(
-                        text = "Notice: In compliance with app store policies, no payment processing occurs inside this TV application.",
-                        color = TvTextMuted,
-                        fontSize = 10.sp,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    prices.forEach { p ->
+                        val isSel = squaresBoard.pricePerSquare == p
                         TvFocusButton(
-                            text = "Open in TV Browser",
-                            icon = Icons.Default.OpenInBrowser,
-                            isPrimary = true,
-                            onClick = {
-                                onOpenBrowser("https://parlaypro-squares.netlify.app")
-                            }
-                        )
-                        TvFocusButton(
-                            text = "Done / Close",
-                            onClick = onClosePayment
+                            text = "$$p",
+                            isPrimary = isSel,
+                            onClick = { handleSetPrice(p) },
+                            modifier = Modifier.padding(horizontal = 4.dp)
                         )
                     }
                 }
             }
+            Spacer(modifier = Modifier.height(16.dp))
         }
-    }
-}
 
-@Composable
-fun SquareGridCell(
-    cell: SquareCell?,
-    onToggle: () -> Unit
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
-
-    val isUser = cell?.isUserSquare == true
-    val isTaken = cell?.ownerName != null && !isUser
-
-    val cellBg = when {
-        isUser -> TvOrangeFocus
-        isTaken -> TvTakenGrey
-        else -> TvDarkCard
-    }
-
-    val cellText = when {
-        isUser -> "YOU"
-        isTaken -> cell?.ownerName ?: "X"
-        else -> ""
-    }
-
-    Box(
-        modifier = Modifier
-            .size(38.dp)
-            .padding(2.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(cellBg)
-            .border(
-                width = if (isFocused) 2.5.dp else 0.5.dp,
-                color = if (isFocused) Color.White else if (isUser) TvOrangeFocus else TvDarkCardElevated,
-                shape = RoundedCornerShape(4.dp)
-            )
-            .focusable(interactionSource = interactionSource)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onToggle
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        if (cellText.isNotEmpty()) {
+        // Available Games Row
+        item {
             Text(
-                text = cellText,
-                color = if (isUser) Color.Black else TvTextSecondary,
-                fontSize = if (isUser) 10.sp else 9.sp,
-                fontWeight = FontWeight.Black,
-                textAlign = TextAlign.Center
-            )
-        } else if (isFocused) {
-            Text(
-                text = "+",
-                color = TvOrangeFocus,
-                fontSize = 14.sp,
+                text = "Select Matchup for Pool",
+                color = TvTextPrimary,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold
             )
+            Spacer(modifier = Modifier.height(8.dp))
+            if (games.isEmpty()) {
+                Text(
+                    text = "No games scheduled today",
+                    color = TvTextSecondary,
+                    fontSize = 13.sp
+                )
+            } else {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(games) { g ->
+                        val isSelected = selectedGame?.id == g.id
+                        TvFocusCard(
+                            onClick = { onSelectGame(g) },
+                            modifier = Modifier.width(220.dp)
+                        ) { isFocused ->
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = g.league,
+                                    color = TvOrangeFocus,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "${g.awayTeam.displayName} @ ${g.homeTeam.displayName}",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(20.dp))
         }
-    }
-}
 
-@Composable
-fun ProceduralQrCode(
-    url: String,
-    modifier: Modifier = Modifier
-) {
-    // Generates an authentic visual representation of QR matrix
-    val matrixSize = 25
-    val pattern = remember(url) {
-        val rand = Random(url.hashCode().toLong())
-        Array(matrixSize) { r ->
-            BooleanArray(matrixSize) { c ->
-                // Corner positioning squares (top-left, top-right, bottom-left)
-                val inTopLeft = r in 0..6 && c in 0..6
-                val inTopRight = r in 0..6 && c in (matrixSize - 7) until matrixSize
-                val inBottomLeft = r in (matrixSize - 7) until matrixSize && c in 0..6
+        // 10x10 Grid representation
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(TvDarkSurface)
+                    .padding(16.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = selectedGame?.let { "${it.awayTeam.displayName} (Columns) vs ${it.homeTeam.displayName} (Rows)" } ?: "Super Bowl / Championship Pool",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                if (inTopLeft || inTopRight || inBottomLeft) {
-                    val localR = if (inBottomLeft) r - (matrixSize - 7) else r
-                    val localC = if (inTopRight) c - (matrixSize - 7) else c
-                    (localR == 0 || localR == 6 || localC == 0 || localC == 6) ||
-                    (localR in 2..4 && localC in 2..4)
-                } else {
-                    rand.nextBoolean()
+                    // Column headers (Away numbers 0-9)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        Box(modifier = Modifier.size(28.dp)) // empty top-left
+                        squaresBoard.awayNumbers.forEach { num ->
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .padding(1.dp)
+                                    .background(TvDarkCardElevated),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "$num",
+                                    color = TvLimeAccent,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    // 10 Rows with Home numbers
+                    for (r in 0 until 10) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                            // Row Header (Home number)
+                            val rowNum = squaresBoard.homeNumbers.getOrNull(r) ?: r
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .padding(1.dp)
+                                    .background(TvDarkCardElevated),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "$rowNum",
+                                    color = TvOrangeFocus,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            // 10 Cells in this row
+                            for (c in 0 until 10) {
+                                val cellIndex = r * 10 + c
+                                val cell = squaresBoard.cells.getOrNull(cellIndex)
+                                val isUser = cell?.isUserSquare == true
+                                val isClaimed = !cell?.ownerName.isNullOrBlank()
+
+                                val interactionSource = remember { MutableInteractionSource() }
+                                val isFocused by interactionSource.collectIsFocusedAsState()
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .padding(1.dp)
+                                        .background(
+                                            when {
+                                                isFocused -> Color.White
+                                                isUser -> TvOrangeFocus
+                                                isClaimed -> TvDarkCard
+                                                else -> TvDarkBackground
+                                            }
+                                        )
+                                        .border(
+                                            width = 1.dp,
+                                            color = if (isFocused) TvOrangeFocus else TvDarkSurface
+                                        )
+                                        .focusable(interactionSource = interactionSource)
+                                        .clickable(interactionSource = interactionSource, indication = null) {
+                                            onToggleSquare(r, c)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isUser) {
+                                        Text(
+                                            text = "ME",
+                                            color = Color.Black,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    } else if (isClaimed) {
+                                        Text(
+                                            text = cell?.ownerName?.take(2)?.uppercase() ?: "",
+                                            color = TvTextMuted,
+                                            fontSize = 8.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Action buttons
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TvFocusButton(
+                            text = "Pay via Cash App ($${squaresBoard.pricePerSquare})",
+                            icon = Icons.Default.QrCode,
+                            isPrimary = true,
+                            onClick = { handleOpenPayment("Cash App") }
+                        )
+                        TvFocusButton(
+                            text = "Pay via Venmo",
+                            icon = Icons.Default.Payment,
+                            onClick = { handleOpenPayment("Venmo") }
+                        )
+                    }
                 }
             }
         }
     }
 
-    Canvas(modifier = modifier.fillMaxSize()) {
-        val cellSize = size.width / matrixSize
-        for (r in 0 until matrixSize) {
-            for (c in 0 until matrixSize) {
-                if (pattern[r][c]) {
-                    drawRect(
-                        color = Color.Black,
-                        topLeft = Offset(c * cellSize, r * cellSize),
-                        size = Size(cellSize, cellSize)
+    // Payment QR Dialog
+    if (showPaymentDialog) {
+        Dialog(onDismissRequest = handleClosePayment) {
+            Box(
+                modifier = Modifier
+                    .width(420.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(TvDarkSurface)
+                    .padding(24.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Pay with $paymentMethod",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Send $${squaresBoard.pricePerSquare} per claimed square to lock your picks.",
+                        color = TvTextSecondary,
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .size(160.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QrCode2,
+                            contentDescription = "QR Code",
+                            tint = Color.Black,
+                            modifier = Modifier.size(120.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    TvFocusButton(
+                        text = "Done",
+                        onClick = handleClosePayment,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }

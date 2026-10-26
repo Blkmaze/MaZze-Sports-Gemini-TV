@@ -3,7 +3,6 @@ package com.example.viewmodel
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
-import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.api.ChannelMatchingHelper
@@ -17,12 +16,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.random.Random
 
 class TvMainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -30,12 +26,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     private val playlistRepo = PlaylistRepository(application)
     private val updaterRepo = UpdaterRepository(application)
 
-    private val coroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->
-        Log.e("TvMainViewModel", "Crash prevented in ViewModel coroutine", throwable)
+    private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        // Safe swallow: prevent unhandled coroutine failure from killing the app process
     }
-
-    private val _lastCrashReport = MutableStateFlow<String?>(null)
-    val lastCrashReport: StateFlow<String?> = _lastCrashReport.asStateFlow()
 
     private val _currentScreen = MutableStateFlow(0)
     val currentScreen: StateFlow<Int> = _currentScreen.asStateFlow()
@@ -58,35 +51,33 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     private val _lastUpdatedTime = MutableStateFlow("Updating...")
     val lastUpdatedTime: StateFlow<String> = _lastUpdatedTime.asStateFlow()
 
-    // Spoiler free feature
     private val _spoilerFree = MutableStateFlow(false)
     val spoilerFree: StateFlow<Boolean> = _spoilerFree.asStateFlow()
 
     private val _revealedGameIds = MutableStateFlow<Set<String>>(emptySet())
     val revealedGameIds: StateFlow<Set<String>> = _revealedGameIds.asStateFlow()
 
-    // Multiview state: 4 slots & audio tile index (0..3)
     private val _multiviewChannels = MutableStateFlow<List<Channel?>>(listOf(null, null, null, null))
     val multiviewChannels: StateFlow<List<Channel?>> = _multiviewChannels.asStateFlow()
 
     private val _multiviewGameTitles = MutableStateFlow<List<String?>>(listOf(null, null, null, null))
     val multiviewGameTitles: StateFlow<List<String?>> = _multiviewGameTitles.asStateFlow()
 
-    // Up to 3 candidate channels per multiview tile for automatic failover/backup rotation
-    private val _multiviewCandidates = MutableStateFlow<List<List<Channel>>>(listOf(emptyList(), emptyList(), emptyList(), emptyList()))
+    private val _multiviewCandidates = MutableStateFlow<List<List<Channel>>>(
+        listOf(emptyList(), emptyList(), emptyList(), emptyList())
+    )
     val multiviewCandidates: StateFlow<List<List<Channel>>> = _multiviewCandidates.asStateFlow()
 
     private val manualTileIndices = mutableSetOf<Int>()
-    private val tileEvictionQueue = mutableListOf(0, 1, 2, 3) // Tracks oldest to newest tile for FIFO eviction
+    private val tileEvictionQueue = mutableListOf(0, 1, 2, 3)
 
     private val _multiviewSoundIndex = MutableStateFlow(0)
     val multiviewSoundIndex: StateFlow<Int> = _multiviewSoundIndex.asStateFlow()
 
-    // Squares Contest state
     private val _squaresSelectedGame = MutableStateFlow<Game?>(null)
     val squaresSelectedGame: StateFlow<Game?> = _squaresSelectedGame.asStateFlow()
 
-    private val _squaresBoard = MutableStateFlow<SquaresBoard>(createInitialSquaresBoard(""))
+    private val _squaresBoard = MutableStateFlow(createInitialSquaresBoard(""))
     val squaresBoard: StateFlow<SquaresBoard> = _squaresBoard.asStateFlow()
 
     private val _showSquaresQrDialog = MutableStateFlow(false)
@@ -95,26 +86,30 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     private val _squaresPaymentMethod = MutableStateFlow("Cash App")
     val squaresPaymentMethod: StateFlow<String> = _squaresPaymentMethod.asStateFlow()
 
-    // Settings & Updater state
     private val _playlistConfig = MutableStateFlow(playlistRepo.loadConfig())
     val playlistConfig: StateFlow<PlaylistConfig> = _playlistConfig.asStateFlow()
 
     private val _updateInfo = MutableStateFlow(UpdateInfo())
     val updateInfo: StateFlow<UpdateInfo> = _updateInfo.asStateFlow()
 
-    // NCAA CFB AP Top 20 & SEC Focus state
     private val _ncaaFootballData = MutableStateFlow(NcaaFootballData())
     val ncaaFootballData: StateFlow<NcaaFootballData> = _ncaaFootballData.asStateFlow()
 
     private val _channelSearchFilter = MutableStateFlow("")
     val channelSearchFilter: StateFlow<String> = _channelSearchFilter.asStateFlow()
 
+    private val _lastCrashReport = MutableStateFlow<String?>(null)
+    val lastCrashReport: StateFlow<String?> = _lastCrashReport.asStateFlow()
+
     private var pollJob: Job? = null
     private var ncaaPollJob: Job? = null
     private val timeFormat = SimpleDateFormat("h:mm:ss a", Locale.getDefault())
 
     init {
-        _spoilerFree.value = _playlistConfig.value.spoilerFree
+        try {
+            _spoilerFree.value = _playlistConfig.value.spoilerFree
+        } catch (e: Throwable) {}
+
         loadCrashReport()
         loadChannels()
         startScoreboardPolling()
@@ -123,35 +118,28 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
 
     fun loadCrashReport() {
         try {
-            val file = File(getApplication<Application>().filesDir, "last_crash.txt")
-            if (file.exists() && file.length() > 0) {
-                _lastCrashReport.value = file.readText()
-            } else {
-                _lastCrashReport.value = null
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
+            val crashFile = java.io.File(getApplication<Application>().filesDir, "last_crash.txt")
+            _lastCrashReport.value = if (crashFile.exists()) crashFile.readText() else null
+        } catch (e: Throwable) {
             _lastCrashReport.value = null
         }
     }
 
     fun clearCrashReport() {
         try {
-            val file = File(getApplication<Application>().filesDir, "last_crash.txt")
-            if (file.exists()) {
-                file.delete()
+            val crashFile = java.io.File(getApplication<Application>().filesDir, "last_crash.txt")
+            if (crashFile.exists()) {
+                crashFile.delete()
             }
             _lastCrashReport.value = null
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (e: Throwable) {
+            _lastCrashReport.value = null
         }
     }
 
     fun setScreen(screenIndex: Int) {
         _currentScreen.value = screenIndex
-        if (screenIndex == 1) {
-            autoFillMultiviewTop20(forceAll = false)
-        }
+        _isFullScreenPlayer.value = false
     }
 
     fun setChannelSearchFilter(query: String) {
@@ -160,46 +148,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
 
     fun openChannelsWithFilter(query: String) {
         _channelSearchFilter.value = query
-        _currentScreen.value = 2 // Channels Screen
-    }
-
-    private fun startNcaaPolling() {
-        ncaaPollJob?.cancel()
-        ncaaPollJob = viewModelScope.launch(coroutineExceptionHandler) {
-            while (isActive) {
-                try {
-                    fetchNcaaFootball()
-                } catch (e: Exception) {
-                    Log.e("TvMainViewModel", "NCAA fetch error", e)
-                }
-                delay(5 * 60 * 1000L) // 5 minutes refresh
-            }
-        }
-    }
-
-    suspend fun fetchNcaaFootball() {
-        try {
-            val res = espnRepo.fetchNcaaFootballAndRankings()
-            if (res.isSuccess) {
-                _ncaaFootballData.value = res.getOrNull() ?: NcaaFootballData()
-                autoFillMultiviewTop20(forceAll = false)
-            }
-        } catch (e: Exception) {
-            Log.e("TvMainViewModel", "fetchNcaaFootball error", e)
-        }
-    }
-
-    fun matchChannelForNcaaGame(game: NcaaGame, excludeIds: Set<String> = emptySet()): Channel? {
-        val candidates = ChannelMatchingHelper.findCandidatesForNcaaGame(game, _channels.value, excludeIds, limit = 1)
-        return candidates.firstOrNull()
-    }
-
-    fun getCandidatesForNcaaGame(game: NcaaGame, excludeIds: Set<String> = emptySet()): List<Channel> {
-        return ChannelMatchingHelper.findCandidatesForNcaaGame(game, _channels.value, excludeIds, limit = 3)
-    }
-
-    fun getCandidatesForGame(game: Game, excludeIds: Set<String> = emptySet()): List<Channel> {
-        return ChannelMatchingHelper.findCandidatesForGame(game, _channels.value, excludeIds, limit = 3)
+        setScreen(2) // Navigate to Channels
     }
 
     fun setFullScreenPlayer(fullScreen: Boolean) {
@@ -223,39 +172,26 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleSpoilerFreeMode() {
         val newVal = playlistRepo.toggleSpoilerFree(_spoilerFree.value)
         _spoilerFree.value = newVal
-        _playlistConfig.value = _playlistConfig.value.copy(spoilerFree = newVal)
     }
 
     fun toggleFavorite(channelId: String) {
-        playlistRepo.toggleFavorite(channelId)
-        val favs = playlistRepo.getFavorites()
+        val isFav = playlistRepo.toggleFavorite(channelId)
         _channels.value = _channels.value.map {
-            it.copy(isFavorite = favs.contains(it.id))
+            if (it.id == channelId) it.copy(isFavorite = isFav) else it
         }
     }
 
     fun loadChannels() {
-        viewModelScope.launch(coroutineExceptionHandler) {
+        viewModelScope.launch(exceptionHandler) {
             try {
                 val list = playlistRepo.loadChannels()
                 _channels.value = list
-
-                // Set default stream if none playing or current is outdated
-                if ((_currentPlayingChannel.value == null || list.none { it.id == _currentPlayingChannel.value?.id }) && list.isNotEmpty()) {
+                if (_currentPlayingChannel.value == null && list.isNotEmpty()) {
                     _currentPlayingChannel.value = list.firstOrNull()
                 }
-
-                // Populate multiview initial slots via Top 20 auto-fill if available
                 autoFillMultiviewTop20(forceAll = false)
-                if (_multiviewChannels.value.all { it == null } && list.isNotEmpty()) {
-                    val slots = MutableList<Channel?>(4) { null }
-                    for (i in 0 until minOf(4, list.size)) {
-                        slots[i] = list.getOrNull(i)
-                    }
-                    _multiviewChannels.value = slots
-                }
-            } catch (e: Exception) {
-                Log.e("TvMainViewModel", "Error in loadChannels", e)
+            } catch (e: Throwable) {
+                // Keep existing channels if reload failed
             }
         }
     }
@@ -267,273 +203,184 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun loadDemoChannels() {
-        val demoConfig = PlaylistConfig(type = "demo", spoilerFree = _spoilerFree.value)
-        updatePlaylistConfig(demoConfig)
+        viewModelScope.launch(exceptionHandler) {
+            val config = PlaylistConfig(type = "demo")
+            playlistRepo.saveConfig(config)
+            _playlistConfig.value = config
+            val list = playlistRepo.getCuratedDemoSportsChannels()
+            _channels.value = list
+            _currentPlayingChannel.value = list.firstOrNull()
+            autoFillMultiviewTop20(forceAll = true)
+        }
     }
 
     fun setMultiviewSound(tileIndex: Int) {
-        _multiviewSoundIndex.value = tileIndex
+        if (tileIndex in 0..3) {
+            _multiviewSoundIndex.value = tileIndex
+        }
     }
 
     fun setMultiviewSlotChannel(slotIndex: Int, channel: Channel) {
-        try {
-            val slots = _multiviewChannels.value.toMutableList()
+        if (slotIndex in 0..3) {
+            val list = _multiviewChannels.value.toMutableList()
+            while (list.size < 4) list.add(null)
+            list[slotIndex] = channel
+            _multiviewChannels.value = list
+
             val titles = _multiviewGameTitles.value.toMutableList()
-            val candidatesList = _multiviewCandidates.value.toMutableList()
-            if (slotIndex in 0..3) {
-                slots[slotIndex] = channel
-                titles[slotIndex] = null // Clear auto-fill title so channel name is displayed
-                candidatesList[slotIndex] = listOf(channel)
-                manualTileIndices.add(slotIndex)
-                tileEvictionQueue.remove(slotIndex)
-                tileEvictionQueue.add(slotIndex)
-                _multiviewChannels.value = slots
-                _multiviewGameTitles.value = titles
-                _multiviewCandidates.value = candidatesList
-            }
-        } catch (e: Exception) {
-            Log.e("TvMainViewModel", "Error in setMultiviewSlotChannel", e)
+            while (titles.size < 4) titles.add(null)
+            titles[slotIndex] = channel.name
+            _multiviewGameTitles.value = titles
+
+            manualTileIndices.add(slotIndex)
+            tileEvictionQueue.remove(slotIndex)
+            tileEvictionQueue.add(slotIndex)
         }
     }
 
-    /**
-     * Adds a game (Game or NcaaGame) to the first empty multiview tile
-     * (or the oldest tile if all four are occupied), stores candidates, title and channel.
-     * Returns the 1-based tile index (1..4) where it was assigned.
-     */
-    fun addGameToMultiview(
-        gameTitle: String,
-        candidateChannels: List<Channel>
-    ): Int {
-        return try {
-            val slots = _multiviewChannels.value.toMutableList()
-            val titles = _multiviewGameTitles.value.toMutableList()
-            val candidatesList = _multiviewCandidates.value.toMutableList()
+    fun addGameToMultiview(gameTitle: String, candidateChannels: List<Channel>): Int {
+        val targetSlot = tileEvictionQueue.firstOrNull { it !in manualTileIndices }
+            ?: tileEvictionQueue.firstOrNull()
+            ?: 0
 
-            // 1. Find first empty slot (null channel)
-            var targetIndex = slots.indexOfFirst { it == null }
+        val list = _multiviewChannels.value.toMutableList()
+        while (list.size < 4) list.add(null)
+        list[targetSlot] = candidateChannels.firstOrNull()
+        _multiviewChannels.value = list
 
-            // 2. If all 4 are occupied, pick the oldest tile from tileEvictionQueue
-            if (targetIndex !in 0..3) {
-                targetIndex = tileEvictionQueue.firstOrNull() ?: 0
-            }
+        val titles = _multiviewGameTitles.value.toMutableList()
+        while (titles.size < 4) titles.add(null)
+        titles[targetSlot] = gameTitle
+        _multiviewGameTitles.value = titles
 
-            val primaryChannel = candidateChannels.firstOrNull()
+        val candList = _multiviewCandidates.value.toMutableList()
+        while (candList.size < 4) candList.add(emptyList())
+        candList[targetSlot] = candidateChannels
+        _multiviewCandidates.value = candList
 
-            if (targetIndex in 0..3) {
-                slots[targetIndex] = primaryChannel
-                titles[targetIndex] = gameTitle
-                candidatesList[targetIndex] = candidateChannels
-                manualTileIndices.add(targetIndex)
-                tileEvictionQueue.remove(targetIndex)
-                tileEvictionQueue.add(targetIndex)
+        manualTileIndices.add(targetSlot)
+        tileEvictionQueue.remove(targetSlot)
+        tileEvictionQueue.add(targetSlot)
 
-                _multiviewChannels.value = slots
-                _multiviewGameTitles.value = titles
-                _multiviewCandidates.value = candidatesList
-            }
-
-            targetIndex + 1
-        } catch (e: Exception) {
-            Log.e("TvMainViewModel", "Error in addGameToMultiview", e)
-            1
-        }
+        setScreen(1) // Multiview
+        return targetSlot
     }
 
-    /**
-     * Cycles a multiview tile to its next backup/candidate channel if current fails or stalls.
-     * Returns true if a different candidate channel was selected.
-     */
-    fun cycleMultiviewTileToNextCandidate(tileIndex: Int): Boolean {
-        try {
-            if (tileIndex !in 0..3) return false
-            val currentChannel = _multiviewChannels.value.getOrNull(tileIndex)
-            val candidates = _multiviewCandidates.value.getOrNull(tileIndex) ?: emptyList()
-            if (candidates.size <= 1) return false
+    fun cycleMultiviewTileToNextCandidate(tileIndex: Int) {
+        if (tileIndex !in 0..3) return
+        val candidates = _multiviewCandidates.value.getOrNull(tileIndex) ?: return
+        if (candidates.size <= 1) return
 
-            val currentIdx = candidates.indexOfFirst { it.id == currentChannel?.id }
-            val nextIdx = if (currentIdx >= 0) (currentIdx + 1) % candidates.size else 0
-            val nextChannel = candidates.getOrNull(nextIdx) ?: candidates.firstOrNull()
+        val current = _multiviewChannels.value.getOrNull(tileIndex)
+        val currentIndex = candidates.indexOfFirst { it.id == current?.id }
+        val nextIndex = if (currentIndex >= 0) (currentIndex + 1) % candidates.size else 0
 
-            if (nextChannel != null && nextChannel.id != currentChannel?.id) {
-                val slots = _multiviewChannels.value.toMutableList()
-                slots[tileIndex] = nextChannel
-                _multiviewChannels.value = slots
-                return true
-            }
-            return false
-        } catch (e: Exception) {
-            Log.e("TvMainViewModel", "Error in cycleMultiviewTileToNextCandidate", e)
-            return false
-        }
+        val nextChannel = candidates.getOrNull(nextIndex) ?: return
+        val list = _multiviewChannels.value.toMutableList()
+        list[tileIndex] = nextChannel
+        _multiviewChannels.value = list
     }
 
     fun autoFillMultiviewTop20(forceAll: Boolean = false) {
-        try {
-            if (forceAll) {
-                manualTileIndices.clear()
-                tileEvictionQueue.clear()
-                tileEvictionQueue.addAll(listOf(0, 1, 2, 3))
-            }
+        viewModelScope.launch(exceptionHandler) {
             val allChannels = _channels.value
-            if (allChannels.isEmpty()) return
+            if (allChannels.isEmpty()) return@launch
 
-            val ncaaGames = _ncaaFootballData.value.games
-            // 1. Prioritize games involving AP Top 20 teams from the Top 20 section
-            val top20Games = ncaaGames.filter { game ->
-                (game.homeRank != null && game.homeRank <= 20) || (game.awayRank != null && game.awayRank <= 20)
-            }
+            val topGames = _ncaaFootballData.value.games
+            val currentMultiview = _multiviewChannels.value.toMutableList()
+            while (currentMultiview.size < 4) currentMultiview.add(null)
 
-            val candidateGames = if (top20Games.isNotEmpty()) {
-                top20Games.sortedWith(
-                    compareBy<NcaaGame> { !it.isLive } // Live games first
-                        .thenBy { if (it.state == "pre") 0 else 1 } // Soonest today
-                        .thenBy { it.startTime }
-                        .thenBy { it.bestRank }
-                )
-            } else if (ncaaGames.isNotEmpty()) {
-                ncaaGames.sortedWith(
-                    compareBy<NcaaGame> { !it.isLive }
-                        .thenBy { if (it.state == "pre") 0 else 1 }
-                        .thenBy { it.startTime }
-                )
-            } else {
-                emptyList()
-            }
-
-            val currentSlots = _multiviewChannels.value.toMutableList()
             val currentTitles = _multiviewGameTitles.value.toMutableList()
+            while (currentTitles.size < 4) currentTitles.add(null)
+
             val currentCandidates = _multiviewCandidates.value.toMutableList()
+            while (currentCandidates.size < 4) currentCandidates.add(emptyList())
 
-            val assignedChannelIds = mutableSetOf<String>()
-            // If not forcing all, preserve channels of manual slots
-            for (i in 0..3) {
-                if (!forceAll && manualTileIndices.contains(i)) {
-                    currentSlots.getOrNull(i)?.id?.let { assignedChannelIds.add(it) }
-                }
-            }
+            val usedChannelIds = mutableSetOf<String>()
 
-            // Match NCAA games to available channels and keep up to 3 candidates
-            val matchedList = mutableListOf<Triple<Any, List<Channel>, String>>()
-            for (game in candidateGames) {
-                val candidates = getCandidatesForNcaaGame(game, excludeIds = assignedChannelIds)
-                    .ifEmpty { getCandidatesForNcaaGame(game) }
-                if (candidates.isNotEmpty()) {
-                    val awayR = if (game.awayRank != null) "#${game.awayRank} " else ""
-                    val homeR = if (game.homeRank != null) "#${game.homeRank} " else ""
-                    val title = "${awayR}${game.awayTeam.displayName} vs ${homeR}${game.homeTeam.displayName}"
-                    matchedList.add(Triple(game, candidates, title))
-                    candidates.firstOrNull()?.id?.let { assignedChannelIds.add(it) }
-                    if (matchedList.size >= 4) break
-                }
-            }
-
-            // If fewer than 4 matched from NCAA, check live games from _games.value (NFL, MLB, etc.)
-            if (matchedList.size < 4) {
-                val liveGeneralGames = _games.value.filter { it.isLive }
-                for (game in liveGeneralGames) {
-                    val candidates = getCandidatesForGame(game, excludeIds = assignedChannelIds)
-                        .ifEmpty { getCandidatesForGame(game) }
-                    if (candidates.isNotEmpty()) {
-                        val title = "${game.awayTeam.displayName} vs ${game.homeTeam.displayName}"
-                        matchedList.add(Triple(game, candidates, title))
-                        candidates.firstOrNull()?.id?.let { assignedChannelIds.add(it) }
-                        if (matchedList.size >= 4) break
-                    }
-                }
-            }
-
-            var matchIdx = 0
-            for (i in 0..3) {
-                if (forceAll || !manualTileIndices.contains(i)) {
-                    if (matchIdx < matchedList.size) {
-                        val item = matchedList.getOrNull(matchIdx++)
-                        if (item != null) {
-                            val (_, cands, title) = item
-                            currentSlots[i] = cands.firstOrNull()
-                            currentTitles[i] = title
-                            currentCandidates[i] = cands
+            for (i in 0 until 4) {
+                if (forceAll || currentMultiview.getOrNull(i) == null) {
+                    val candidateGame = topGames.getOrNull(i)
+                    if (candidateGame != null) {
+                        val candidates = ChannelMatchingHelper.findCandidatesForNcaaGame(
+                            candidateGame, allChannels, usedChannelIds
+                        )
+                        val topMatch = candidates.firstOrNull()
+                        if (topMatch != null) {
+                            usedChannelIds.add(topMatch.id)
+                            currentMultiview[i] = topMatch
+                            currentTitles[i] = "${candidateGame.awayTeam.displayName} @ ${candidateGame.homeTeam.displayName}"
+                            currentCandidates[i] = candidates
                         }
-                    } else if (forceAll && currentSlots.getOrNull(i) == null && i < allChannels.size) {
-                        val ch = allChannels.getOrNull(i)
-                        if (ch != null) {
-                            currentSlots[i] = ch
-                            currentTitles[i] = null
-                            currentCandidates[i] = listOf(ch)
+                    } else {
+                        val fallback = allChannels.firstOrNull { it.id !in usedChannelIds }
+                        if (fallback != null) {
+                            usedChannelIds.add(fallback.id)
+                            currentMultiview[i] = fallback
+                            currentTitles[i] = fallback.name
+                            currentCandidates[i] = listOf(fallback)
                         }
                     }
                 }
             }
 
-            _multiviewChannels.value = currentSlots
+            _multiviewChannels.value = currentMultiview
             _multiviewGameTitles.value = currentTitles
             _multiviewCandidates.value = currentCandidates
-        } catch (e: Exception) {
-            Log.e("TvMainViewModel", "Error in autoFillMultiviewTop20", e)
         }
     }
 
     private fun startScoreboardPolling() {
         pollJob?.cancel()
-        pollJob = viewModelScope.launch(coroutineExceptionHandler) {
-            while (isActive) {
-                try {
-                    fetchScoreboards()
-                } catch (e: Exception) {
-                    Log.e("TvMainViewModel", "Scoreboard polling error", e)
-                }
-                delay(20_000) // Poll every 20 seconds
+        pollJob = viewModelScope.launch(exceptionHandler) {
+            while (true) {
+                fetchScoreboards()
+                delay(30000)
+            }
+        }
+    }
+
+    private fun startNcaaPolling() {
+        ncaaPollJob?.cancel()
+        ncaaPollJob = viewModelScope.launch(exceptionHandler) {
+            while (true) {
+                fetchNcaaFootball()
+                delay(60000)
             }
         }
     }
 
     fun refreshScoreboardsManual() {
-        viewModelScope.launch(coroutineExceptionHandler) {
-            try {
-                fetchScoreboards()
-            } catch (e: Exception) {
-                Log.e("TvMainViewModel", "refreshScoreboardsManual error", e)
-            }
+        viewModelScope.launch(exceptionHandler) {
+            fetchScoreboards()
+            fetchNcaaFootball()
         }
     }
 
     private suspend fun fetchScoreboards() {
         try {
             val result = espnRepo.fetchAllScoreboards()
-            if (result.isSuccess) {
-                val fetchedGames = result.getOrNull() ?: emptyList()
-                if (fetchedGames.isNotEmpty()) {
-                    _games.value = fetchedGames
-                    _isOffline.value = false
-                    _lastUpdatedTime.value = timeFormat.format(Date())
-
-                    // If no top squares game picked, pick first live or upcoming
-                    if (_squaresSelectedGame.value == null) {
-                        val gameForSquares = fetchedGames.firstOrNull { it.isLive } ?: fetchedGames.firstOrNull()
-                        if (gameForSquares != null) {
-                            selectGameForSquares(gameForSquares)
-                        }
-                    }
-
-                    // Match channel for top live game if available
-                    val topLive = fetchedGames.firstOrNull { it.isLive } ?: fetchedGames.firstOrNull()
-                    if (topLive != null && _channels.value.isNotEmpty()) {
-                        val matched = playlistRepo.matchChannelForGame(topLive, _channels.value)
-                        if (matched != null && _currentPlayingChannel.value == null) {
-                            _currentPlayingChannel.value = matched
-                        }
-                    }
-                }
-            } else {
+            result.onSuccess { gameList ->
+                _games.value = gameList
+                _isOffline.value = false
+                _lastUpdatedTime.value = timeFormat.format(Date())
+            }.onFailure {
                 _isOffline.value = true
             }
-        } catch (e: Exception) {
-            Log.e("TvMainViewModel", "Error fetching scoreboards", e)
+        } catch (e: Throwable) {
             _isOffline.value = true
         }
     }
 
-    // --- Squares Logic ---
+    private suspend fun fetchNcaaFootball() {
+        try {
+            val result = espnRepo.fetchNcaaFootballAndRankings()
+            result.onSuccess { data ->
+                _ncaaFootballData.value = data
+            }
+        } catch (e: Throwable) {}
+    }
+
     fun selectGameForSquares(game: Game) {
         _squaresSelectedGame.value = game
         _squaresBoard.value = createInitialSquaresBoard(game.id)
@@ -544,40 +391,18 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleSquareSelection(row: Int, col: Int) {
-        val currentBoard = _squaresBoard.value
-        val updatedCells = currentBoard.cells.map { cell ->
-            if (cell.row == row && cell.col == col) {
-                if (cell.isUserSquare) {
-                    cell.copy(ownerName = null, isUserSquare = false)
-                } else if (cell.ownerName == null) {
-                    cell.copy(ownerName = "YOU", isUserSquare = true)
-                } else {
-                    cell // Already taken by another participant
-                }
-            } else {
-                cell
-            }
+        if (row !in 0..9 || col !in 0..9) return
+        val currentCells = _squaresBoard.value.cells.toMutableList()
+        val index = row * 10 + col
+        val cell = currentCells.getOrNull(index) ?: return
+
+        val updatedCell = if (cell.isUserSquare) {
+            cell.copy(isUserSquare = false, ownerName = "")
+        } else {
+            cell.copy(isUserSquare = true, ownerName = "Me")
         }
-
-        val totalTaken = updatedCells.count { it.ownerName != null }
-        var homeNums = currentBoard.homeNumbers
-        var awayNums = currentBoard.awayNumbers
-
-        // Draw numbers if >= 75% filled
-        if (totalTaken >= 75 && (homeNums == null || awayNums == null)) {
-            val random = Random(currentBoard.gameId.hashCode().toLong())
-            homeNums = (0..9).shuffled(random)
-            awayNums = (0..9).shuffled(random)
-        } else if (totalTaken < 75) {
-            homeNums = null
-            awayNums = null
-        }
-
-        _squaresBoard.value = currentBoard.copy(
-            cells = updatedCells,
-            homeNumbers = homeNums,
-            awayNumbers = awayNums
-        )
+        currentCells[index] = updatedCell
+        _squaresBoard.value = _squaresBoard.value.copy(cells = currentCells)
     }
 
     fun openPaymentQr(method: String) {
@@ -592,94 +417,60 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     fun openBrowserLink(url: String) {
         try {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             getApplication<Application>().startActivity(intent)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Throwable) {}
     }
 
     private fun createInitialSquaresBoard(gameId: String): SquaresBoard {
-        val random = Random(if (gameId.isNotBlank()) gameId.hashCode().toLong() else 42L)
-        val initialCells = mutableListOf<SquareCell>()
-
-        val participantInitials = listOf("JD", "MK", "SL", "CB", "RT", "AW", "PL", "TN", "BH", "EZ", "DW", "RM")
-
-        // Pre-fill approximately 72 squares to represent an active game contest close to the 75% threshold
-        var cellIndex = 0
-        for (r in 0..9) {
-            for (c in 0..9) {
-                val isTaken = random.nextFloat() < 0.72f
-                val owner = if (isTaken) participantInitials[random.nextInt(participantInitials.size)] else null
-                initialCells.add(
-                    SquareCell(
-                        index = cellIndex++,
-                        row = r,
-                        col = c,
-                        ownerName = owner,
-                        isUserSquare = false
-                    )
-                )
-            }
+        val homeNumbers = (0..9).shuffled()
+        val awayNumbers = (0..9).shuffled()
+        val cells = (0 until 100).map { i ->
+            SquareCell(
+                index = i,
+                row = i / 10,
+                col = i % 10,
+                ownerName = if (i % 7 == 0) "Player ${i % 5 + 1}" else "",
+                isUserSquare = false
+            )
         }
-
-        val totalTaken = initialCells.count { it.ownerName != null }
-        val homeNums = if (totalTaken >= 75) (0..9).shuffled(random) else null
-        val awayNums = if (totalTaken >= 75) (0..9).shuffled(random) else null
-
         return SquaresBoard(
             gameId = gameId,
             pricePerSquare = 10,
-            homeNumbers = homeNums,
-            awayNumbers = awayNums,
-            cells = initialCells
+            homeNumbers = homeNumbers,
+            awayNumbers = awayNumbers,
+            cells = cells
         )
     }
 
-    // --- Updates Logic ---
     fun checkForUpdates() {
-        viewModelScope.launch(coroutineExceptionHandler) {
-            try {
-                _updateInfo.value = _updateInfo.value.copy(isChecking = true, errorMessage = null)
-                val info = updaterRepo.checkForUpdates()
-                _updateInfo.value = info.copy(isChecking = false)
-            } catch (e: Exception) {
-                Log.e("TvMainViewModel", "Update check failed", e)
-                _updateInfo.value = _updateInfo.value.copy(isChecking = false, errorMessage = e.localizedMessage)
-            }
+        viewModelScope.launch(exceptionHandler) {
+            _updateInfo.value = _updateInfo.value.copy(isChecking = true)
+            val info = updaterRepo.checkForUpdates()
+            _updateInfo.value = info
         }
     }
 
     fun downloadAndInstallUpdate() {
-        val downloadUrl = _updateInfo.value.downloadUrl ?: return
-        viewModelScope.launch(coroutineExceptionHandler) {
-            try {
-                _updateInfo.value = _updateInfo.value.copy(isDownloading = true, downloadProgress = 0f)
-                val res = updaterRepo.downloadAndInstallApk(downloadUrl) { progress ->
-                    _updateInfo.value = _updateInfo.value.copy(downloadProgress = progress)
-                }
+        val downloadUrl = _updateInfo.value.downloadUrl
+        if (downloadUrl.isBlank()) return
 
-                if (res.isSuccess) {
-                    val file = res.getOrNull()
-                    _updateInfo.value = _updateInfo.value.copy(
-                        isDownloading = false,
-                        readyToInstallPath = file?.absolutePath
-                    )
-                    if (file != null) {
-                        updaterRepo.promptInstall(file)
-                    }
-                } else {
-                    _updateInfo.value = _updateInfo.value.copy(
-                        isDownloading = false,
-                        errorMessage = res.exceptionOrNull()?.localizedMessage ?: "Download failed"
-                    )
-                }
-            } catch (e: Exception) {
-                Log.e("TvMainViewModel", "Update download failed", e)
+        viewModelScope.launch(exceptionHandler) {
+            _updateInfo.value = _updateInfo.value.copy(isDownloading = true, downloadProgress = 0f)
+            val result = updaterRepo.downloadAndInstallApk(downloadUrl) { progress ->
+                _updateInfo.value = _updateInfo.value.copy(downloadProgress = progress)
+            }
+            result.onSuccess { apkFile ->
                 _updateInfo.value = _updateInfo.value.copy(
                     isDownloading = false,
-                    errorMessage = e.localizedMessage ?: "Download error"
+                    readyToInstallPath = apkFile.absolutePath
+                )
+                updaterRepo.promptInstall(apkFile)
+            }.onFailure { err ->
+                _updateInfo.value = _updateInfo.value.copy(
+                    isDownloading = false,
+                    errorMessage = err.localizedMessage
                 )
             }
         }

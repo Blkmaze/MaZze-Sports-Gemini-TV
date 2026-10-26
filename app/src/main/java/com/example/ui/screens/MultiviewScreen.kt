@@ -1,12 +1,12 @@
 package com.example.ui.screens
 
-import android.net.Uri
+import android.content.Context
 import android.widget.FrameLayout
-import android.view.ViewGroup
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,358 +25,262 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.C
+import androidx.compose.ui.window.Dialog
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.Lifecycle
-import android.util.Log
 import com.example.model.Channel
-import com.example.ui.components.TvClock
 import com.example.ui.components.TvFocusButton
 import com.example.ui.theme.*
-import kotlinx.coroutines.delay
-import java.util.Locale
 
 @Composable
 fun MultiviewScreen(
     channels: List<Channel>,
     multiviewChannels: List<Channel?>,
-    multiviewGameTitles: List<String?> = listOf(null, null, null, null),
+    multiviewGameTitles: List<String?>,
     activeSoundIndex: Int,
     onSetSoundIndex: (Int) -> Unit,
     onSlotChannelChange: (Int, Channel) -> Unit,
-    onAutoFillTop20: () -> Unit = {},
+    onAutoFillTop20: () -> Unit,
     onExpandTile: (Channel) -> Unit,
-    onCycleTileBackup: (Int) -> Boolean = { false },
+    onCycleTileBackup: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var activeMenuTile by remember { mutableStateOf<Int?>(null) }
     var channelPickerSlot by remember { mutableStateOf<Int?>(null) }
+    var secondaryPlayingTile by remember { mutableIntStateOf((activeSoundIndex + 1) % 4) }
 
-    // (1) Never run more than 2 hardware video decoders at once:
-    // only activeSoundIndex and secondaryPlayingTile get full playback.
-    var secondaryPlayingTile by remember {
-        mutableIntStateOf(if (activeSoundIndex == 0) 1 else 0)
-    }
-
+    // Ensure secondary tile is always distinct from sound active tile
     LaunchedEffect(activeSoundIndex) {
         if (secondaryPlayingTile == activeSoundIndex) {
             secondaryPlayingTile = (activeSoundIndex + 1) % 4
         }
     }
 
-    // Focus requesters for the 4 grid tiles
-    val tileFocusRequesters = remember { List(4) { FocusRequester() } }
-
-    LaunchedEffect(Unit) {
-        val initialFocusIndex = if (activeSoundIndex in 0..3) activeSoundIndex else 0
-        kotlinx.coroutines.delay(300)
-        try { tileFocusRequesters.getOrNull(initialFocusIndex)?.requestFocus() } catch (e: Exception) { }
-    }
-
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+            .background(TvDarkBackground)
+            .padding(16.dp)
     ) {
-        // Compact Top Status Header
+        // Top Toolbar
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 2.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Multiview 2x2",
+                    text = "Quad Multiview",
                     color = Color.White,
-                    fontSize = 17.sp,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Black
                 )
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(16.dp))
                 Text(
-                    text = "Press OK on any tile for Action Menu  •  Sound: Tile ${activeSoundIndex + 1}",
+                    text = "Audio: Tile ${activeSoundIndex + 1} • Max 2 Decoders Active",
                     color = TvLimeAccent,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+            Row {
                 TvFocusButton(
-                    text = "Auto-fill Top 20",
-                    icon = Icons.Default.Bolt,
+                    text = "Auto-Fill AP Top 20",
+                    icon = Icons.Default.AutoFixHigh,
                     onClick = onAutoFillTop20
                 )
-                TvClock()
             }
         }
 
-        // 2x2 Grid - Tiles fill the whole screen area
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 2x2 Multiview Grid
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Top Row: Tile 0 (Left), Tile 1 (Right)
+            // Row 1 (Tiles 0 & 1)
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                MultiviewTile(
-                    tileIndex = 0,
-                    channel = multiviewChannels.getOrNull(0),
-                    gameTitle = multiviewGameTitles.getOrNull(0),
-                    isSoundActive = activeSoundIndex == 0,
-                    isPlaybackEnabled = (0 == activeSoundIndex || 0 == secondaryPlayingTile),
-                    focusRequester = tileFocusRequesters[0],
-                    onStartPlayback = { secondaryPlayingTile = 0 },
-                    onOpenMenu = { activeMenuTile = 0 },
-                    onTryBackup = { onCycleTileBackup(0) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .focusProperties {
-                            right = tileFocusRequesters[1]
-                            down = tileFocusRequesters[2]
-                        }
-                )
+                for (idx in 0..1) {
+                    val isSound = idx == activeSoundIndex
+                    // Only active sound tile and at most 1 secondary tile decode video
+                    val shouldPlayVideo = (idx == activeSoundIndex || idx == secondaryPlayingTile)
 
-                MultiviewTile(
-                    tileIndex = 1,
-                    channel = multiviewChannels.getOrNull(1),
-                    gameTitle = multiviewGameTitles.getOrNull(1),
-                    isSoundActive = activeSoundIndex == 1,
-                    isPlaybackEnabled = (1 == activeSoundIndex || 1 == secondaryPlayingTile),
-                    focusRequester = tileFocusRequesters[1],
-                    onStartPlayback = { secondaryPlayingTile = 1 },
-                    onOpenMenu = { activeMenuTile = 1 },
-                    onTryBackup = { onCycleTileBackup(1) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .focusProperties {
-                            left = tileFocusRequesters[0]
-                            down = tileFocusRequesters[3]
-                        }
-                )
+                    MultiviewTile(
+                        tileIndex = idx,
+                        channel = multiviewChannels.getOrNull(idx),
+                        gameTitle = multiviewGameTitles.getOrNull(idx),
+                        isSoundActive = isSound,
+                        shouldPlayVideo = shouldPlayVideo,
+                        onClick = {
+                            if (activeSoundIndex != idx) {
+                                onSetSoundIndex(idx)
+                            }
+                            secondaryPlayingTile = idx
+                        },
+                        onOpenMenu = { activeMenuTile = idx },
+                        onStartPlayback = {
+                            secondaryPlayingTile = idx
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    )
+                }
             }
 
-            // Bottom Row: Tile 2 (Left), Tile 3 (Right)
+            // Row 2 (Tiles 2 & 3)
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                MultiviewTile(
-                    tileIndex = 2,
-                    channel = multiviewChannels.getOrNull(2),
-                    gameTitle = multiviewGameTitles.getOrNull(2),
-                    isSoundActive = activeSoundIndex == 2,
-                    isPlaybackEnabled = (2 == activeSoundIndex || 2 == secondaryPlayingTile),
-                    focusRequester = tileFocusRequesters[2],
-                    onStartPlayback = { secondaryPlayingTile = 2 },
-                    onOpenMenu = { activeMenuTile = 2 },
-                    onTryBackup = { onCycleTileBackup(2) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .focusProperties {
-                            up = tileFocusRequesters[0]
-                            right = tileFocusRequesters[3]
-                        }
-                )
+                for (idx in 2..3) {
+                    val isSound = idx == activeSoundIndex
+                    val shouldPlayVideo = (idx == activeSoundIndex || idx == secondaryPlayingTile)
 
-                MultiviewTile(
-                    tileIndex = 3,
-                    channel = multiviewChannels.getOrNull(3),
-                    gameTitle = multiviewGameTitles.getOrNull(3),
-                    isSoundActive = activeSoundIndex == 3,
-                    isPlaybackEnabled = (3 == activeSoundIndex || 3 == secondaryPlayingTile),
-                    focusRequester = tileFocusRequesters[3],
-                    onStartPlayback = { secondaryPlayingTile = 3 },
-                    onOpenMenu = { activeMenuTile = 3 },
-                    onTryBackup = { onCycleTileBackup(3) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .focusProperties {
-                            up = tileFocusRequesters[1]
-                            left = tileFocusRequesters[2]
-                        }
-                )
+                    MultiviewTile(
+                        tileIndex = idx,
+                        channel = multiviewChannels.getOrNull(idx),
+                        gameTitle = multiviewGameTitles.getOrNull(idx),
+                        isSoundActive = isSound,
+                        shouldPlayVideo = shouldPlayVideo,
+                        onClick = {
+                            if (activeSoundIndex != idx) {
+                                onSetSoundIndex(idx)
+                            }
+                            secondaryPlayingTile = idx
+                        },
+                        onOpenMenu = { activeMenuTile = idx },
+                        onStartPlayback = {
+                            secondaryPlayingTile = idx
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    )
+                }
             }
         }
     }
 
-    // Action Menu Dialog when OK is pressed on a tile
-    if (activeMenuTile != null) {
-        val slot = activeMenuTile!!
+    // Tile Menu Dialog (Switch Channel, Backup stream, Fullscreen, Change Audio)
+    activeMenuTile?.let { slot ->
         val currentChannel = multiviewChannels.getOrNull(slot)
-        val gameTitle = multiviewGameTitles.getOrNull(slot)
-
-        AlertDialog(
-            onDismissRequest = { activeMenuTile = null },
-            containerColor = TvDarkSurface,
-            title = {
+        Dialog(onDismissRequest = { activeMenuTile = null }) {
+            Box(
+                modifier = Modifier
+                    .width(420.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(TvDarkSurface)
+                    .padding(24.dp)
+            ) {
                 Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Tile ${slot + 1} Actions",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
-                        )
-                        if (activeSoundIndex == slot) {
-                            Text(
-                                text = "AUDIO ACTIVE",
-                                color = TvLimeAccent,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Black,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color(0xFF1E3A1E))
-                                    .padding(horizontal = 8.dp, vertical = 3.dp)
-                            )
-                        }
-                    }
-                    if (!gameTitle.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = gameTitle,
-                            color = TvLimeAccent,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    if (currentChannel != null) {
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Channel: ${currentChannel.name}",
-                            color = TvTextMuted,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Button 1: Sound On Here
-                    MultiviewMenuButton(
-                        text = if (activeSoundIndex == slot) "Sound On Here (Active)" else "Sound On Here",
-                        icon = Icons.Default.VolumeUp,
-                        isHighlighted = activeSoundIndex == slot,
-                        autoFocus = true,
-                        onClick = {
-                            val prevSound = activeSoundIndex
-                            onSetSoundIndex(slot)
-                            if (secondaryPlayingTile == slot) {
-                                secondaryPlayingTile = prevSound
-                            }
-                            activeMenuTile = null
-                        }
+                    Text(
+                        text = "Tile ${slot + 1} Options",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
                     )
-
-                    // Button 1b: Play Video in This Tile (if not currently decoding video)
-                    if (slot != activeSoundIndex && slot != secondaryPlayingTile && currentChannel != null) {
-                        MultiviewMenuButton(
-                            text = "Play Video in This Tile",
-                            icon = Icons.Default.PlayArrow,
-                            onClick = {
-                                secondaryPlayingTile = slot
-                                activeMenuTile = null
-                            }
-                        )
-                    }
-
-                    // Button 2: Fullscreen
-                    MultiviewMenuButton(
-                        text = "Fullscreen",
-                        icon = Icons.Default.Fullscreen,
-                        enabled = currentChannel != null,
-                        onClick = {
-                            activeMenuTile = null
-                            currentChannel?.let(onExpandTile)
-                        }
+                    Text(
+                        text = currentChannel?.name ?: "Empty Tile",
+                        color = TvOrangeFocus,
+                        fontSize = 13.sp
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    // Button 3: Change Channel
-                    MultiviewMenuButton(
-                        text = "Change Channel",
-                        icon = Icons.Default.LiveTv,
+                    TvFocusButton(
+                        text = "Select / Change Channel",
+                        icon = Icons.Default.Tv,
+                        isPrimary = true,
                         onClick = {
-                            val targetSlot = slot
+                            val targetSlot = activeMenuTile
                             activeMenuTile = null
                             channelPickerSlot = targetSlot
-                        }
+                        },
+                        modifier = Modifier.fillMaxWidth()
                     )
 
-                    // Button 4: Auto-fill Top 20 Games
-                    MultiviewMenuButton(
-                        text = "Auto-fill Top 20 Games",
-                        icon = Icons.Default.Bolt,
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    TvFocusButton(
+                        text = "Set Sound Active",
+                        icon = Icons.Default.VolumeUp,
                         onClick = {
+                            onSetSoundIndex(slot)
+                            secondaryPlayingTile = slot
                             activeMenuTile = null
-                            onAutoFillTop20()
-                        }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (currentChannel != null) {
+                        TvFocusButton(
+                            text = "Watch Fullscreen",
+                            icon = Icons.Default.Fullscreen,
+                            onClick = {
+                                activeMenuTile = null
+                                onExpandTile(currentChannel)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        TvFocusButton(
+                            text = "Cycle to Backup Channel",
+                            icon = Icons.Default.SwapHoriz,
+                            onClick = {
+                                onCycleTileBackup(slot)
+                                activeMenuTile = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    TvFocusButton(
+                        text = "Close",
+                        onClick = { activeMenuTile = null },
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
-            },
-            confirmButton = {
-                TvFocusButton(
-                    text = "Close",
-                    onClick = { activeMenuTile = null }
-                )
             }
-        )
+        }
     }
 
-    // Change Channel Picker Dialog with Quick Filter Chips & Search Box
-    if (channelPickerSlot != null) {
-        val slot = channelPickerSlot!!
+    // Channel Picker Dialog for Slot
+    channelPickerSlot?.let { slot ->
         MultiviewChannelPickerDialog(
             slot = slot,
             allChannels = channels,
             onDismiss = { channelPickerSlot = null },
-            onChannelChosen = { chosenChannel ->
-                onSlotChannelChange(slot, chosenChannel)
+            onChannelChosen = { ch ->
+                onSlotChannelChange(slot, ch)
                 channelPickerSlot = null
             }
         )
@@ -390,718 +294,275 @@ fun MultiviewTile(
     channel: Channel?,
     gameTitle: String?,
     isSoundActive: Boolean,
-    isPlaybackEnabled: Boolean,
-    focusRequester: FocusRequester,
-    onStartPlayback: () -> Unit,
+    shouldPlayVideo: Boolean,
+    onClick: () -> Unit,
     onOpenMenu: () -> Unit,
-    onTryBackup: () -> Boolean = { false },
+    onStartPlayback: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+    var isPlayerError by remember { mutableStateOf(false) }
+    var errorDetail by remember { mutableStateOf("") }
 
-    var isReleased by remember { mutableStateOf(false) }
-
-    // Dedicated status state for this tile
-    var playerStatus by remember { mutableStateOf("Initializing") }
-    var statusIsError by remember { mutableStateOf(false) }
-    var statusDetailText by remember { mutableStateOf("") }
-    var isTryingBackup by remember { mutableStateOf(false) }
-
-    // (1) & (2) Independent ExoPlayer for this tile, created ONLY when playback is enabled.
-    // Capped: DefaultTrackSelector (640x360, 1.2Mbps for non-sound), small buffer (2s min, 5s max),
-    // and DefaultRenderersFactory with decoder fallback.
-    val exoPlayer = remember(tileIndex, channel?.id, isPlaybackEnabled) {
-        val streamUrl = channel?.streamUrl
-        if (!isPlaybackEnabled || streamUrl.isNullOrBlank()) {
+    // Quality capped ExoPlayer: only instantiated if channel present AND decoder slot allowed
+    val exoPlayer = remember(context, channel?.streamUrl, shouldPlayVideo) {
+        if (!shouldPlayVideo || channel == null || channel.streamUrl.isBlank()) {
             null
         } else {
             try {
-                val renderersFactory = DefaultRenderersFactory(context).apply {
-                    setEnableDecoderFallback(true)
-                }
-
                 val trackSelector = DefaultTrackSelector(context).apply {
+                    // Cap non-sound tiles to 360p / 1.2Mbps to prevent hardware decoder starvation
                     if (!isSoundActive) {
-                        parameters = buildUponParameters()
-                            .setMaxVideoSize(640, 360)
-                            .setMaxVideoBitrate(1_200_000)
-                            .build()
+                        setParameters(
+                            buildUponParameters()
+                                .setMaxVideoSize(640, 360)
+                                .setMaxVideoBitrate(1200000)
+                        )
                     }
                 }
 
                 val loadControl = DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(
-                        /* minBufferMs = */ 2000,
-                        /* maxBufferMs = */ 5000,
-                        /* bufferForPlaybackMs = */ 1000,
-                        /* bufferForPlaybackAfterRebufferMs = */ 1500
-                    )
-                    .setBackBuffer(
-                        /* backBufferDurationMs = */ 0,
-                        /* retainBackBufferFromKeyframe = */ false
-                    )
+                    .setBufferDurationsMs(2000, 5000, 1000, 1000)
+                    .setBackBuffer(0, false)
                     .build()
 
-                val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-                    .setUserAgent("Mozilla/5.0 (Linux; Android 14; Fire TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                    .setAllowCrossProtocolRedirects(true)
-                    .setConnectTimeoutMs(8000)
-                    .setReadTimeoutMs(8000)
-
-                val mediaSourceFactory = DefaultMediaSourceFactory(httpDataSourceFactory)
+                val renderersFactory = DefaultRenderersFactory(context)
+                    .setEnableDecoderFallback(true)
 
                 ExoPlayer.Builder(context, renderersFactory)
-                    .setMediaSourceFactory(mediaSourceFactory)
                     .setTrackSelector(trackSelector)
                     .setLoadControl(loadControl)
-                    .setWakeMode(C.WAKE_MODE_NETWORK)
                     .build().apply {
-                        repeatMode = Player.REPEAT_MODE_OFF
-                        volume = if (isSoundActive) 1.0f else 0.0f
-                        val mediaItem = MediaItem.Builder().setUri(Uri.parse(streamUrl)).build()
+                        val mediaItem = MediaItem.fromUri(channel.streamUrl)
                         setMediaItem(mediaItem)
+                        volume = if (isSoundActive) 1.0f else 0.0f
                         prepare()
                         playWhenReady = true
                     }
-            } catch (e: Exception) {
-                Log.e("MultiviewTile", "Error creating ExoPlayer for tile $tileIndex", e)
+            } catch (e: Throwable) {
                 null
             }
         }
     }
 
-    // (4) Track playback state & errors, and release player when channel changes,
-    // tile disabled, or screen leaves composition or activity stops
-    DisposableEffect(exoPlayer, lifecycleOwner) {
-        if (exoPlayer != null && !isReleased) {
-            val listener = object : Player.Listener {
-                override fun onPlayerError(error: PlaybackException) {
-                    statusIsError = true
-                    val cause = error.cause?.localizedMessage ?: error.localizedMessage ?: ""
-                    statusDetailText = when {
-                        cause.contains("404", ignoreCase = true) -> "HTTP 404 Feed Not Found"
-                        cause.contains("timeout", ignoreCase = true) -> "Stream Timed Out"
-                        else -> "Error: ${error.errorCodeName}"
-                    }
-                    playerStatus = "Error"
-                }
-
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    when (playbackState) {
-                        Player.STATE_BUFFERING -> {
-                            if (!statusIsError) playerStatus = "Loading"
-                        }
-                        Player.STATE_READY -> {
-                            statusIsError = false
-                            isTryingBackup = false
-                            playerStatus = "Playing"
-                        }
-                        Player.STATE_ENDED -> {
-                            playerStatus = "Stream Ended"
-                        }
-                        Player.STATE_IDLE -> {
-                            if (!statusIsError) playerStatus = "Idle"
-                        }
-                    }
-                }
-
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    if (isPlaying) {
-                        statusIsError = false
-                        isTryingBackup = false
-                        playerStatus = "Playing"
-                    }
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                isPlayerError = true
+                errorDetail = error.errorCodeName
+            }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) {
+                    isPlayerError = false
                 }
             }
+        }
+        try {
+            exoPlayer?.addListener(listener)
+        } catch (e: Throwable) {}
 
+        onDispose {
             try {
-                exoPlayer.addListener(listener)
-            } catch (e: Exception) {
-                // Ignore
-            }
-
-            val lifecycleObserver = androidx.lifecycle.LifecycleEventObserver { _, event ->
-                if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
-                    try {
-                        isReleased = true
-                        exoPlayer.stop()
-                        exoPlayer.release()
-                    } catch (e: Exception) {
-                        // Ignore
-                    }
-                }
-            }
-            lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
-
-            onDispose {
-                lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
-                try {
-                    isReleased = true
-                    exoPlayer.removeListener(listener)
-                    exoPlayer.stop()
-                    exoPlayer.release()
-                } catch (e: Exception) {
-                    // Ignore
-                }
-            }
-        } else {
-            onDispose { }
+                exoPlayer?.removeListener(listener)
+                exoPlayer?.stop()
+                exoPlayer?.release()
+            } catch (e: Throwable) {}
         }
     }
 
-    // Audio & Track quality routing
-    LaunchedEffect(exoPlayer, isSoundActive, isReleased) {
-        if (!isReleased && exoPlayer != null) {
-            try {
-                exoPlayer.volume = if (isSoundActive) 1.0f else 0.0f
-                val selector = exoPlayer.trackSelector as? DefaultTrackSelector
-                if (selector != null) {
-                    selector.parameters = selector.buildUponParameters().apply {
-                        if (!isSoundActive) {
-                            setMaxVideoSize(640, 360)
-                            setMaxVideoBitrate(1_200_000)
-                        } else {
-                            clearVideoSizeConstraints()
-                            setMaxVideoBitrate(Int.MAX_VALUE)
-                        }
-                    }.build()
-                }
-            } catch (e: Exception) {
-                // Ignore
-            }
-        }
-    }
-
-    // Reset status when channel changes
-    LaunchedEffect(channel?.id) {
-        if (channel != null) {
-            playerStatus = "Loading"
-            statusIsError = false
-            statusDetailText = ""
-            isTryingBackup = false
-        } else {
-            playerStatus = "No channel found"
-            statusIsError = false
-            statusDetailText = ""
-        }
-    }
-
-    // Watchdog: If stream errors or stalls in "Loading" for > 8 seconds, automatically try backup candidate channel
-    LaunchedEffect(channel?.id, playerStatus, statusIsError, isPlaybackEnabled) {
-        if (isPlaybackEnabled && channel != null && (statusIsError || playerStatus == "Loading")) {
-            delay(8000)
-            if (statusIsError || playerStatus == "Loading") {
-                isTryingBackup = true
-                playerStatus = "Trying backup channel"
-                val swapped = onTryBackup()
-                if (!swapped) {
-                    isTryingBackup = false
-                }
-            }
-        }
+    LaunchedEffect(exoPlayer, isSoundActive) {
+        try {
+            exoPlayer?.volume = if (isSoundActive) 1.0f else 0.0f
+        } catch (e: Throwable) {}
     }
 
     Box(
         modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(TvDarkCard)
             .border(
-                width = if (isFocused) 3.5.dp else if (isSoundActive) 2.dp else 1.dp,
-                color = when {
-                    isFocused -> TvOrangeFocus
-                    isSoundActive -> TvLimeAccent
-                    else -> TvDarkCardElevated
-                },
-                shape = RoundedCornerShape(10.dp)
+                BorderStroke(
+                    width = if (isFocused) 3.dp else if (isSoundActive) 2.dp else 1.dp,
+                    color = if (isFocused) Color.White else if (isSoundActive) TvOrangeFocus else Color.Transparent
+                ),
+                RoundedCornerShape(12.dp)
             )
-            .focusRequester(focusRequester)
             .focusable(interactionSource = interactionSource)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = {
-                    if (channel != null && !isPlaybackEnabled) {
-                        onStartPlayback()
-                    } else {
-                        onOpenMenu()
-                    }
-                }
-            )
-    ) {
-        // Video View surface, Still poster, or Empty state
-        if (channel != null && isPlaybackEnabled && exoPlayer != null) {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        try {
-                            if (!isReleased) this.player = exoPlayer
-                        } catch (e: Exception) {
-                            Log.e("MultiviewTile", "Error assigning player to PlayerView", e)
-                        }
-                        useController = false
-                        keepScreenOn = true
-                        layoutParams = FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                    }
-                },
-                update = { view ->
-                    try {
-                        if (!isReleased && view.player != exoPlayer) {
-                            view.player = exoPlayer
-                        }
-                    } catch (e: Exception) {
-                        Log.e("MultiviewTile", "Error updating PlayerView", e)
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else if (channel != null && !isPlaybackEnabled) {
-            // (1) Still poster with channel name and 'Press OK to play' hint
-            StillPosterTileView(
-                channel = channel,
-                gameTitle = gameTitle,
-                isFocused = isFocused
-            )
-        } else {
-            // No Channel found state
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(TvDarkSurface),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(16.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.SearchOff,
-                        contentDescription = null,
-                        tint = TvOrangeFocus,
-                        modifier = Modifier.size(36.dp)
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "No channel found",
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Press OK to pick one",
-                        color = TvLimeAccent,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
+            .clickable(interactionSource = interactionSource, indication = null) {
+                onClick()
             }
-        }
-
-        // Top Header: Game Name / Channel Title & Sound Badge
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xCC0D0D10))
-                .padding(horizontal = 8.dp, vertical = 5.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                if (!gameTitle.isNullOrBlank()) {
-                    Text(
-                        text = gameTitle,
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (channel != null) {
+    ) {
+        if (channel != null && !channel.streamUrl.isBlank()) {
+            if (shouldPlayVideo && exoPlayer != null) {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            player = exoPlayer
+                            useController = false
+                            keepScreenOn = true
+                            layoutParams = FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT
+                            )
+                        }
+                    },
+                    update = { view ->
+                        try {
+                            if (view.player != exoPlayer) {
+                                view.player = exoPlayer
+                            }
+                        } catch (e: Throwable) {}
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                // Defensive Still Poster view when hardware decoders are reserved
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(TvDarkSurface)
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Tv,
+                            contentDescription = null,
+                            tint = TvTextSecondary,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = channel.name,
-                            color = TvLimeAccent,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
-                    }
-                } else {
-                    Text(
-                        text = channel?.name ?: "Tile ${tileIndex + 1} (Empty)",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(6.dp))
-
-            // Audio Indicator Badge
-            if (isSoundActive) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(TvLimeAccent)
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.VolumeUp,
-                        contentDescription = "Sound Active",
-                        tint = Color.Black,
-                        modifier = Modifier.size(11.dp)
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                        text = "AUDIO ON",
-                        color = Color.Black,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                }
-            } else {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(Color(0x77000000))
-                        .padding(horizontal = 5.dp, vertical = 2.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.VolumeMute,
-                        contentDescription = "Muted",
-                        tint = TvTextMuted,
-                        modifier = Modifier.size(11.dp)
-                    )
-                    Spacer(modifier = Modifier.width(2.dp))
-                    Text(
-                        text = "MUTED",
-                        color = TvTextMuted,
-                        fontSize = 9.sp
-                    )
-                }
-            }
-        }
-
-        // Status Overlay: Loading / Playing / Error text / Backup notification (only when playback enabled)
-        if (channel != null && isPlaybackEnabled) {
-            when {
-                isTryingBackup -> {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xE60D0D10))
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
-                                color = TvOrangeFocus,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(TvOrangeFocus)
+                                .clickable { onStartPlayback() }
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
                             Text(
-                                text = "Trying backup channel...",
-                                color = TvOrangeFocus,
+                                text = "Press OK to play",
+                                color = Color.Black,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
-                statusIsError -> {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xEE1A0C0C))
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Warning,
-                                    contentDescription = null,
-                                    tint = TvOrangeFocus,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Playback Error",
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            if (statusDetailText.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = statusDetailText,
-                                    color = Color(0xFFF87171),
-                                    fontSize = 10.sp
-                                )
-                            }
-                            Text(
-                                text = channel.name,
-                                color = TvTextMuted,
-                                fontSize = 9.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-                playerStatus == "Loading" -> {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xCC0D0D10))
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
-                                color = TvLimeAccent,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = "Loading...",
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = channel.name,
-                                    color = TvTextMuted,
-                                    fontSize = 9.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-                }
-                playerStatus == "Playing" -> {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 34.dp, end = 8.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xCC0D0D10))
-                            .padding(horizontal = 7.dp, vertical = 3.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(TvLimeAccent)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Playing",
-                                color = TvLimeAccent,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
+            }
+        } else {
+            // Empty slot
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable { onOpenMenu() },
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.AddCircleOutline,
+                        contentDescription = null,
+                        tint = TvTextSecondary,
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Tile ${tileIndex + 1} (Empty)",
+                        color = TvTextSecondary,
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        text = "Click to assign channel",
+                        color = TvTextMuted,
+                        fontSize = 11.sp
+                    )
                 }
             }
         }
 
-        // Focused Action Hint at Bottom
-        if (isFocused) {
+        // Top Tile Status Badges
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp)
+                .align(Alignment.TopCenter),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .background(Color(0xE60D0D10))
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                contentAlignment = Alignment.Center
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.Black.copy(alpha = 0.75f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
                 Text(
-                    text = if (channel != null && !isPlaybackEnabled) "Press OK to play" else "Press OK for Action Menu",
-                    color = TvOrangeFocus,
-                    fontSize = 11.sp,
+                    text = "Tile ${tileIndex + 1}",
+                    color = Color.White,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
-        }
-    }
-}
 
-@Composable
-fun StillPosterTileView(
-    channel: Channel,
-    gameTitle: String?,
-    isFocused: Boolean,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color(0xFF13151B)),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(16.dp)
-        ) {
-            // Play Icon Pill with 'Press OK to play' hint
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(if (isFocused) TvOrangeFocus else Color(0x33FFFFFF))
-                    .border(
-                        width = 1.5.dp,
-                        color = if (isFocused) TvOrangeFocus else TvLimeAccent,
-                        shape = RoundedCornerShape(24.dp)
-                    )
-                    .padding(horizontal = 14.dp, vertical = 7.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+            Row {
+                if (isSoundActive) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(TvOrangeFocus)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "AUDIO ON",
+                            color = Color.Black,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                IconButton(
+                    onClick = onOpenMenu,
+                    modifier = Modifier.size(24.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play",
-                        tint = if (isFocused) Color.Black else TvLimeAccent,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = "Press OK to play",
-                        color = if (isFocused) Color.Black else Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Options",
+                        tint = Color.White
                     )
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Text(
-                text = channel.name,
-                color = Color.White,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            if (!gameTitle.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(3.dp))
+        // Bottom Channel Name
+        if (channel != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .background(Color.Black.copy(alpha = 0.7f))
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
                 Text(
-                    text = gameTitle,
-                    color = TvTextSecondary,
-                    fontSize = 11.sp,
+                    text = gameTitle ?: channel.name,
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Standby • Video Decoder Saved",
-                color = TvTextMuted,
-                fontSize = 10.sp
-            )
         }
-    }
-}
-
-@Composable
-fun MultiviewMenuButton(
-    text: String,
-    icon: ImageVector,
-    enabled: Boolean = true,
-    isHighlighted: Boolean = false,
-    autoFocus: Boolean = false,
-    onClick: () -> Unit
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    val focusRequester = remember { FocusRequester() }
-
-    if (autoFocus) {
-        LaunchedEffect(Unit) {
-            kotlinx.coroutines.delay(300)
-        try { focusRequester.requestFocus() } catch (e: Exception) { }
-        }
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(52.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(
-                when {
-                    !enabled -> Color(0xFF1E1E22)
-                    isFocused -> TvOrangeFocus
-                    isHighlighted -> TvDarkCardElevated
-                    else -> TvDarkCard
-                }
-            )
-            .border(
-                width = if (isFocused) 2.5.dp else if (isHighlighted) 1.5.dp else 1.dp,
-                color = when {
-                    isFocused -> Color.White
-                    isHighlighted -> TvLimeAccent
-                    else -> Color(0xFF2E2E36)
-                },
-                shape = RoundedCornerShape(10.dp)
-            )
-            .then(if (autoFocus) Modifier.focusRequester(focusRequester) else Modifier)
-            .focusable(enabled = enabled, interactionSource = interactionSource)
-            .clickable(
-                enabled = enabled,
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick
-            )
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = when {
-                !enabled -> TvTextMuted
-                isFocused -> Color.Black
-                isHighlighted -> TvLimeAccent
-                else -> Color.White
-            },
-            modifier = Modifier.size(22.dp)
-        )
-        Spacer(modifier = Modifier.width(14.dp))
-        Text(
-            text = text,
-            color = when {
-                !enabled -> TvTextMuted
-                isFocused -> Color.Black
-                else -> Color.White
-            },
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp
-        )
     }
 }
 
@@ -1112,213 +573,70 @@ fun MultiviewChannelPickerDialog(
     onDismiss: () -> Unit,
     onChannelChosen: (Channel) -> Unit
 ) {
-    val filterChips = remember {
-        listOf("All", "ESPN", "SEC", "NFL", "NBA", "MLB", "NHL", "Local")
-    }
-    var selectedChip by remember { mutableStateOf("All") }
     var searchQuery by remember { mutableStateOf("") }
-
-    val filteredChannels = remember(allChannels, selectedChip, searchQuery) {
-        allChannels.filter { channel ->
-            val name = channel.name
-            val group = channel.groupTitle
-
-            val matchesChip = when (selectedChip) {
-                "All" -> true
-                "Local" -> {
-                    listOf("ABC", "CBS", "NBC", "FOX").any { loc ->
-                        name.contains(loc, ignoreCase = true) || group.contains(loc, ignoreCase = true)
-                    }
-                }
-                else -> {
-                    name.contains(selectedChip, ignoreCase = true) || group.contains(selectedChip, ignoreCase = true)
-                }
-            }
-
-            val matchesSearch = if (searchQuery.isNotBlank()) {
-                val qTerms = searchQuery.lowercase(Locale.ROOT).split(" ").filter { it.isNotBlank() }
-                val nameLower = name.lowercase(Locale.ROOT)
-                val groupLower = group.lowercase(Locale.ROOT)
-                qTerms.all { term -> nameLower.contains(term) || groupLower.contains(term) }
-            } else true
-
-            matchesChip && matchesSearch
-        }
+    val filtered = remember(searchQuery, allChannels) {
+        if (searchQuery.isBlank()) allChannels
+        else allChannels.filter { it.name.contains(searchQuery, ignoreCase = true) }
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = TvDarkSurface,
-        title = {
-            Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Assign Channel: Tile ${slot + 1}",
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "${filteredChannels.size} found",
-                        color = TvLimeAccent,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
+    Dialog(onDismissRequest = onDismiss) {
+        Box(
+            modifier = Modifier
+                .width(520.dp)
+                .height(440.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(TvDarkSurface)
+                .padding(20.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
                 Text(
-                    text = "Select a quick filter or enter text to pick a channel for this pane",
-                    color = TvTextMuted,
-                    fontSize = 12.sp
+                    text = "Assign Channel to Tile ${slot + 1}",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
                 )
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(380.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // Quick Filter Chips row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    filterChips.forEach { chip ->
-                        val isSelected = selectedChip == chip
-                        val interactionSource = remember { MutableInteractionSource() }
-                        val isFocused by interactionSource.collectIsFocusedAsState()
+                Spacer(modifier = Modifier.height(12.dp))
 
-                        Box(
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(filtered) { ch ->
+                        Row(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(
-                                    when {
-                                        isFocused -> TvOrangeFocus
-                                        isSelected -> TvLimeAccent
-                                        else -> TvDarkCard
-                                    }
-                                )
-                                .border(
-                                    width = if (isFocused) 2.dp else 1.dp,
-                                    color = if (isFocused) Color.White else Color(0xFF2E2E36),
-                                    shape = RoundedCornerShape(6.dp)
-                                )
-                                .focusable(interactionSource = interactionSource)
-                                .clickable(
-                                    interactionSource = interactionSource,
-                                    indication = null,
-                                    onClick = { selectedChip = chip }
-                                )
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(TvDarkCard)
+                                .clickable { onChannelChosen(ch) }
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = chip,
-                                color = if (isFocused || isSelected) Color.Black else Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
+                                text = ch.name,
+                                color = TvTextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = ch.groupTitle,
+                                color = TvOrangeFocus,
+                                fontSize = 11.sp
                             )
                         }
                     }
                 }
 
-                // Search Input Box
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search channel name or team...", fontSize = 12.sp) },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = TvOrangeFocus,
-                        unfocusedBorderColor = TvDarkCardElevated,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedContainerColor = TvDarkCard,
-                        unfocusedContainerColor = TvDarkCard
-                    ),
-                    modifier = Modifier.fillMaxWidth()
+                Spacer(modifier = Modifier.height(12.dp))
+                TvFocusButton(
+                    text = "Cancel",
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.End)
                 )
-
-                // Channels List
-                if (filteredChannels.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(TvDarkCard),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "No channels match '$selectedChip' / search query",
-                            color = TvTextMuted,
-                            fontSize = 13.sp
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        items(filteredChannels, key = { it.id }) { ch ->
-                            val interactionSource = remember { MutableInteractionSource() }
-                            val isFocused by interactionSource.collectIsFocusedAsState()
-
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isFocused) TvOrangeFocus else TvDarkCard)
-                                    .border(
-                                        width = if (isFocused) 2.dp else 0.dp,
-                                        color = if (isFocused) Color.White else Color.Transparent,
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                    .focusable(interactionSource = interactionSource)
-                                    .clickable(
-                                        interactionSource = interactionSource,
-                                        indication = null,
-                                        onClick = { onChannelChosen(ch) }
-                                    )
-                                    .padding(horizontal = 12.dp, vertical = 9.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = ch.name,
-                                    color = if (isFocused) Color.Black else Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    modifier = Modifier.weight(1f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = ch.groupTitle,
-                                    color = if (isFocused) Color(0xFF222222) else TvTextMuted,
-                                    fontSize = 11.sp,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-                }
             }
-        },
-        confirmButton = {
-            TvFocusButton(
-                text = "Close",
-                onClick = onDismiss
-            )
         }
-    )
+    }
 }

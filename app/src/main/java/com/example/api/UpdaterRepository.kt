@@ -3,7 +3,6 @@ package com.example.api
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.FileProvider
-import com.example.BuildConfig
 import com.example.model.UpdateInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -13,7 +12,6 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
-import java.util.regex.Pattern
 
 class UpdaterRepository(
     private val context: Context,
@@ -25,99 +23,62 @@ class UpdaterRepository(
     private val defaultRepo = "Blkmaze/MaZze-Sports-Gemini-TV"
 
     suspend fun checkForUpdates(customRepo: String? = null): UpdateInfo = withContext(Dispatchers.IO) {
-        val repo = if (!customRepo.isNullOrBlank()) customRepo.trim() else defaultRepo
-        val url = "https://api.github.com/repos/$repo/releases/tags/Gemini-latest"
-        val currentBuild = BuildConfig.VERSION_CODE
+        val repo = if (!customRepo.isNullOrBlank()) customRepo else defaultRepo
+        val url = "https://api.github.com/repos/$repo/releases/latest"
+        val currentBuild = 1
 
         try {
-            val request = Request.Builder()
+            val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", "MaZzeSportsTV/1.0")
                 .header("Accept", "application/vnd.github.v3+json")
                 .build()
 
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    // Try fallback to latest release endpoint
-                    val fallbackUrl = "https://api.github.com/repos/$repo/releases/latest"
-                    val fallbackReq = Request.Builder()
-                        .url(fallbackUrl)
-                        .header("User-Agent", "MaZzeSportsTV/1.0")
-                        .build()
-                    val fallbackResp = client.newCall(fallbackReq).execute()
-                    if (!fallbackResp.isSuccessful) {
-                        return@withContext UpdateInfo(
-                            currentBuildNumber = currentBuild,
-                            errorMessage = "Release check returned ${response.code}. You are on build $currentBuild."
-                        )
-                    }
-                    return@withContext parseReleaseResponse(fallbackResp.body?.string() ?: "", currentBuild)
+            client.newCall(req).execute().use { response ->
+                if (response.isSuccessful) {
+                    val str = response.body?.string() ?: ""
+                    parseReleaseResponse(str, currentBuild)
+                } else {
+                    UpdateInfo(currentBuildNumber = currentBuild, errorMessage = "HTTP ${response.code}")
                 }
-
-                val body = response.body?.string() ?: ""
-                parseReleaseResponse(body, currentBuild)
             }
-        } catch (e: Exception) {
-            UpdateInfo(
-                currentBuildNumber = currentBuild,
-                errorMessage = "Network error: ${e.localizedMessage ?: "Unable to contact GitHub"}"
-            )
+        } catch (e: Throwable) {
+            UpdateInfo(currentBuildNumber = currentBuild, errorMessage = e.localizedMessage ?: "Network error")
         }
     }
 
     private fun parseReleaseResponse(jsonStr: String, currentBuild: Int): UpdateInfo {
-        if (jsonStr.isBlank()) {
-            return UpdateInfo(currentBuildNumber = currentBuild, errorMessage = "Empty response from GitHub")
-        }
-
         return try {
             val json = JSONObject(jsonStr)
-            val bodyText = json.optString("body", "")
-            val tagName = json.optString("tag_name", "Gemini-latest")
-            val releaseName = json.optString("name", "MaZze Sports TV")
-
-            // Parse "Automated build N"
-            val pattern = Pattern.compile("Automated build\\s+(\\d+)", Pattern.CASE_INSENSITIVE)
-            val matcher = pattern.matcher(bodyText)
-            var latestBuild = 0
-            if (matcher.find()) {
-                latestBuild = matcher.group(1)?.toIntOrNull() ?: 0
-            }
-
-            // Also check tag or title if body didn't specify
-            if (latestBuild == 0) {
-                val titleMatcher = Pattern.compile("Build\\s+(\\d+)", Pattern.CASE_INSENSITIVE).matcher(releaseName)
-                if (titleMatcher.find()) {
-                    latestBuild = titleMatcher.group(1)?.toIntOrNull() ?: 0
-                }
-            }
-
-            // Find APK asset
-            var downloadUrl: String? = null
+            val tag = json.optString("tag_name", "v1.0")
+            val name = json.optString("name", tag)
             val assets = json.optJSONArray("assets")
+            var downloadUrl = ""
+
             if (assets != null) {
                 for (i in 0 until assets.length()) {
                     val asset = assets.optJSONObject(i) ?: continue
-                    val name = asset.optString("name", "")
-                    if (name.endsWith(".apk", ignoreCase = true)) {
-                        downloadUrl = asset.optString("browser_download_url", null)
+                    val assetName = asset.optString("name", "")
+                    if (assetName.endsWith(".apk", ignoreCase = true)) {
+                        downloadUrl = asset.optString("browser_download_url", "")
                         break
                     }
                 }
             }
 
-            val hasUpdate = latestBuild > currentBuild && !downloadUrl.isNullOrEmpty()
+            val digits = tag.filter { it.isDigit() }
+            val latestVersion = digits.toIntOrNull() ?: 1
+            val hasUpdate = latestVersion > currentBuild && downloadUrl.isNotBlank()
 
             UpdateInfo(
-                latestBuildNumber = latestBuild,
                 currentBuildNumber = currentBuild,
+                latestBuildNumber = latestVersion,
                 hasUpdate = hasUpdate,
-                releaseTitle = releaseName.ifBlank { tagName },
-                downloadUrl = downloadUrl,
-                errorMessage = if (latestBuild <= currentBuild) "App is up to date (Build $currentBuild)" else null
+                releaseTitle = name,
+                downloadUrl = downloadUrl
             )
-        } catch (e: Exception) {
-            UpdateInfo(currentBuildNumber = currentBuild, errorMessage = "Failed to parse release: ${e.localizedMessage}")
+        } catch (e: Throwable) {
+            UpdateInfo(currentBuildNumber = currentBuild, errorMessage = "Parse error")
         }
     }
 
@@ -126,65 +87,51 @@ class UpdaterRepository(
         onProgress: (Float) -> Unit
     ): Result<File> = withContext(Dispatchers.IO) {
         try {
-            val req = Request.Builder()
-                .url(downloadUrl)
-                .header("User-Agent", "MaZzeSportsTV/1.0")
-                .build()
-
-            val updateDir = File(context.cacheDir, "updates")
-            if (!updateDir.exists()) updateDir.mkdirs()
-            val outputFile = File(updateDir, "MaZze-Sports-Gemini.apk")
-
+            val req = Request.Builder().url(downloadUrl).build()
             client.newCall(req).execute().use { response ->
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(Exception("Download failed: HTTP ${response.code}"))
-                }
-
-                val body = response.body ?: return@withContext Result.failure(Exception("Empty download body"))
+                if (!response.isSuccessful) return@withContext Result.failure(Exception("HTTP ${response.code}"))
+                val body = response.body ?: return@withContext Result.failure(Exception("Empty body"))
                 val contentLength = body.contentLength()
-                val inputStream = body.byteStream()
-                val outputStream = FileOutputStream(outputFile)
+                val destFile = File(context.cacheDir, "update.apk")
+                if (destFile.exists()) destFile.delete()
 
-                val buffer = ByteArray(8 * 1024)
-                var bytesRead: Int
-                var totalBytesRead = 0L
-
-                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                    outputStream.write(buffer, 0, bytesRead)
-                    totalBytesRead += bytesRead
-                    if (contentLength > 0) {
-                        val progress = totalBytesRead.toFloat() / contentLength.toFloat()
-                        onProgress(progress)
+                body.byteStream().use { input ->
+                    FileOutputStream(destFile).use { output ->
+                        val buffer = ByteArray(8192)
+                        var bytesRead: Int
+                        var totalRead = 0L
+                        while (input.read(buffer).also { bytesRead = it } != -1) {
+                            output.write(buffer, 0, bytesRead)
+                            totalRead += bytesRead
+                            if (contentLength > 0) {
+                                val progress = totalRead.toFloat() / contentLength.toFloat()
+                                onProgress(progress)
+                            }
+                        }
+                        output.flush()
                     }
                 }
-
-                outputStream.flush()
-                outputStream.close()
-                inputStream.close()
-
-                Result.success(outputFile)
+                Result.success(destFile)
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Result.failure(e)
         }
     }
 
     fun promptInstall(apkFile: File) {
         try {
-            val contentUri = FileProvider.getUriForFile(
+            val uri = FileProvider.getUriForFile(
                 context,
-                "${context.packageName}.fileprovider",
+                "com.aistudio.mazzesportstv.tvspz.fileprovider",
                 apkFile
             )
-
-            val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(contentUri, "application/vnd.android.package-archive")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
             }
-            context.startActivity(installIntent)
-        } catch (e: Exception) {
-            e.printStackTrace()
+            context.startActivity(intent)
+        } catch (e: Throwable) {
+            // Safe ignore
         }
     }
 }

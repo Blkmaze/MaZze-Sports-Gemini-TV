@@ -1,13 +1,20 @@
 package com.example.api
 
-import com.example.model.*
+import com.example.model.ApTeamRank
+import com.example.model.Game
+import com.example.model.NcaaFootballData
+import com.example.model.NcaaGame
+import com.example.model.Team
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 class EspnScoreboardRepository(
@@ -18,7 +25,7 @@ class EspnScoreboardRepository(
 ) {
     data class LeagueTarget(val sport: String, val league: String, val displayName: String)
 
-    val leagues = listOf(
+    val leagues: List<LeagueTarget> = listOf(
         LeagueTarget("football", "nfl", "NFL"),
         LeagueTarget("basketball", "nba", "NBA"),
         LeagueTarget("hockey", "nhl", "NHL"),
@@ -45,82 +52,60 @@ class EspnScoreboardRepository(
     }
 
     suspend fun fetchAllScoreboards(): Result<List<Game>> = withContext(Dispatchers.IO) {
-        val allGames = mutableListOf<Game>()
-        var successCount = 0
-
-        for (target in leagues) {
-            val url = "https://site.api.espn.com/apis/site/v2/sports/${target.sport}/${target.league}/scoreboard"
-            try {
-                val request = Request.Builder()
-                    .url(url)
-                    .header("User-Agent", "MaZzeSportsTV/1.0")
-                    .build()
-
-                client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val body = response.body?.string()
-                        if (!body.isNullOrEmpty()) {
-                            val parsed = parseEspnScoreboard(body, target)
-                            allGames.addAll(parsed)
-                            successCount++
+        try {
+            val allGames = mutableListOf<Game>()
+            for (target in leagues) {
+                try {
+                    val url = "https://site.api.espn.com/apis/site/v2/sports/${target.sport}/${target.league}/scoreboard"
+                    val req = Request.Builder().url(url).header("User-Agent", "MaZzeSportsTV/1.0").build()
+                    client.newCall(req).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val body = response.body?.string() ?: ""
+                            allGames.addAll(parseEspnScoreboard(body, target))
                         }
                     }
+                } catch (e: Throwable) {
+                    // Safe swallow per league
                 }
-            } catch (e: Exception) {
-                // Continue with other leagues
             }
-        }
-
-        if (successCount > 0 || allGames.isNotEmpty()) {
-            val sorted = sortGames(allGames)
-            Result.success(sorted)
-        } else {
-            Result.failure(Exception("Failed to fetch ESPN scoreboards"))
+            Result.success(sortGames(allGames))
+        } catch (e: Throwable) {
+            Result.failure(e)
         }
     }
 
-    private fun parseEspnScoreboard(jsonString: String, target: LeagueTarget): List<Game> {
-        val list = mutableListOf<Game>()
+    fun parseEspnScoreboard(jsonString: String, target: LeagueTarget): List<Game> {
+        val games = mutableListOf<Game>()
         try {
             val root = JSONObject(jsonString)
-            val events = root.optJSONArray("events") ?: return emptyList()
-
+            val events = root.optJSONArray("events") ?: return games
             for (i in 0 until events.length()) {
                 val event = events.optJSONObject(i) ?: continue
-                val eventId = event.optString("id", "")
-                val eventName = event.optString("name", "Matchup")
-                val shortName = event.optString("shortName", eventName)
+                val id = event.optString("id", "")
+                val name = event.optString("name", "")
+                val shortName = event.optString("shortName", "")
                 val dateStr = event.optString("date", "")
 
                 val competitions = event.optJSONArray("competitions")
-                val competition = competitions?.optJSONObject(0) ?: continue
-                val competitors = competition.optJSONArray("competitors") ?: continue
+                val comp = competitions?.optJSONObject(0) ?: continue
+                val competitors = comp.optJSONArray("competitors") ?: continue
 
                 var homeTeam = Team()
                 var awayTeam = Team()
-                var homeScore = "0"
-                var awayScore = "0"
+                var homeScore = ""
+                var awayScore = ""
 
                 for (c in 0 until competitors.length()) {
-                    val comp = competitors.optJSONObject(c) ?: continue
-                    val homeAway = comp.optString("homeAway", "home")
-                    val score = comp.optString("score", "0")
-                    val teamObj = comp.optJSONObject("team")
-                    val teamId = teamObj?.optString("id", "") ?: ""
-                    val location = teamObj?.optString("location", "") ?: ""
-                    val teamName = teamObj?.optString("name", "") ?: ""
-                    val displayName = location.ifEmpty { teamObj?.optString("displayName", teamName) ?: teamName }
-                    val abbrev = teamObj?.optString("abbreviation", "") ?: ""
-                    val logo = teamObj?.optString("logo", null)
-                    val color = teamObj?.optString("color", null)
-
-                    val team = Team(
-                        id = teamId,
-                        displayName = displayName.ifEmpty { "Team" },
-                        abbreviation = if (abbrev.isNotBlank()) abbrev else displayName.take(3).uppercase(),
-                        logo = logo,
-                        color = color
-                    )
+                    val compObj = competitors.optJSONObject(c) ?: continue
+                    val homeAway = compObj.optString("homeAway", "")
+                    val score = compObj.optString("score", "0")
+                    val teamObj = compObj.optJSONObject("team")
+                    val tId = teamObj?.optString("id", "") ?: ""
+                    val tName = teamObj?.optString("displayName", "") ?: ""
+                    val tAbbr = teamObj?.optString("abbreviation", "") ?: ""
+                    val tLogo = teamObj?.optString("logo", "") ?: ""
+                    val tColor = teamObj?.optString("color", "") ?: ""
+                    val team = Team(tId, tName, tAbbr, tLogo, tColor)
 
                     if (homeAway == "home") {
                         homeTeam = team
@@ -131,347 +116,259 @@ class EspnScoreboardRepository(
                     }
                 }
 
-                val statusObj = competition.optJSONObject("status")
+                val statusObj = comp.optJSONObject("status")
                 val typeObj = statusObj?.optJSONObject("type")
                 val state = typeObj?.optString("state", "pre") ?: "pre"
-                val shortDetail = typeObj?.optString("shortDetail", "") ?: ""
+                val statusDetail = typeObj?.optString("shortDetail", "") ?: ""
+                val network = extractNetwork(comp)
 
-                // Extract broadcast network
-                val network = extractNetwork(competition)
-
-                val game = Game(
-                    id = eventId.ifEmpty { "${target.league}_$i" },
-                    sport = target.sport,
-                    league = target.displayName,
-                    name = eventName,
-                    shortName = shortName,
-                    homeTeam = homeTeam,
-                    awayTeam = awayTeam,
-                    homeScore = homeScore,
-                    awayScore = awayScore,
-                    state = state,
-                    statusDetail = shortDetail,
-                    startTime = dateStr,
-                    network = network
+                games.add(
+                    Game(
+                        id = id,
+                        name = name,
+                        shortName = shortName,
+                        sport = target.sport,
+                        league = target.displayName,
+                        homeTeam = homeTeam,
+                        awayTeam = awayTeam,
+                        homeScore = homeScore,
+                        awayScore = awayScore,
+                        statusDetail = statusDetail,
+                        state = state,
+                        startTime = dateStr,
+                        network = network
+                    )
                 )
-                list.add(game)
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (e: Throwable) {
+            // Safe ignore
         }
-        return list
+        return games
+    }
+
+    private fun extractNetwork(comp: JSONObject): String {
+        return try {
+            val broadcasts = comp.optJSONArray("broadcasts")
+            if (broadcasts != null && broadcasts.length() > 0) {
+                val b = broadcasts.optJSONObject(0)
+                val names = b?.optJSONArray("names")
+                if (names != null && names.length() > 0) {
+                    return names.optString(0, "")
+                }
+            }
+            ""
+        } catch (e: Throwable) {
+            ""
+        }
     }
 
     fun sortGames(games: List<Game>): List<Game> {
         return games.sortedWith(
             compareBy<Game> { game ->
                 when (game.state) {
-                    "in" -> 0    // Live games first
-                    "pre" -> 1   // Upcoming games second
-                    "post" -> 2  // Finals last
+                    "in" -> 0
+                    "pre" -> 1
+                    "post" -> 2
                     else -> 3
                 }
-            }.thenBy { game ->
-                game.startTime
-            }
+            }.thenBy { it.startTime }
         )
     }
 
-    // --- NCAA College Football: AP Top 20 & SEC Focus ---
-
     fun isSecTeam(teamName: String, location: String = "", abbrev: String = ""): Boolean {
-        val lowerSec = secTeams.map { it.lowercase(Locale.ROOT) }
         val n = teamName.lowercase(Locale.ROOT)
         val l = location.lowercase(Locale.ROOT)
         val a = abbrev.lowercase(Locale.ROOT)
-
-        return lowerSec.any { sec ->
-            n.contains(sec) || l.contains(sec)
-        } || secAbbrs.contains(a)
+        val lowerSec = secTeams.map { it.lowercase(Locale.ROOT) }
+        val matchesSec = lowerSec.any { n.contains(it) || l.contains(it) }
+        return matchesSec || secAbbrs.contains(a)
     }
 
     suspend fun fetchNcaaFootballAndRankings(): Result<NcaaFootballData> = withContext(Dispatchers.IO) {
         try {
-            // 1. Fetch AP Poll
-            val rankingsUrl = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/rankings"
-            val rankRequest = Request.Builder()
-                .url(rankingsUrl)
-                .header("User-Agent", "MaZzeSportsTV/1.0")
-                .build()
+            val rankings = mutableListOf<ApTeamRank>()
+            val rankMap = mutableMapOf<String, Int>()
 
-            val apTop20 = mutableListOf<ApTeamRank>()
-            val apLookup = mutableMapOf<String, Int>()
-
-            client.newCall(rankRequest).execute().use { response ->
-                if (response.isSuccessful) {
-                    val body = response.body?.string()
-                    if (!body.isNullOrEmpty()) {
+            // 1. Fetch AP Top 25
+            try {
+                val rankUrl = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/rankings"
+                val req = Request.Builder().url(rankUrl).header("User-Agent", "MaZzeSportsTV/1.0").build()
+                client.newCall(req).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val body = response.body?.string() ?: ""
                         val root = JSONObject(body)
                         val rankingsArr = root.optJSONArray("rankings")
-                        val apPoll = rankingsArr?.optJSONObject(0) // AP Top 25
-                        val ranksArr = apPoll?.optJSONArray("ranks")
+                        if (rankingsArr != null && rankingsArr.length() > 0) {
+                            val poll = rankingsArr.optJSONObject(0)
+                            val ranks = poll?.optJSONArray("ranks")
+                            if (ranks != null) {
+                                for (i in 0 until ranks.length()) {
+                                    val rObj = ranks.optJSONObject(i) ?: continue
+                                    val currentRank = rObj.optInt("current", i + 1)
+                                    val teamObj = rObj.optJSONObject("team") ?: continue
+                                    val tId = teamObj.optString("id", "")
+                                    val tName = teamObj.optString("name", "")
+                                    val tDisplay = teamObj.optString("nickname", tName)
+                                    val tAbbr = teamObj.optString("abbreviation", "")
+                                    val tLogo = teamObj.optString("logo", "")
+                                    val isSec = isSecTeam(tName, tDisplay, tAbbr)
 
-                        if (ranksArr != null) {
-                            val limit = minOf(20, ranksArr.length())
-                            for (i in 0 until limit) {
-                                val rObj = ranksArr.optJSONObject(i) ?: continue
-                                val currentRank = rObj.optInt("current", i + 1)
-                                val teamObj = rObj.optJSONObject("team") ?: continue
-                                val tId = teamObj.optString("id", "")
-                                val location = teamObj.optString("location", "")
-                                val nickname = teamObj.optString("name", "")
-                                val abbrev = teamObj.optString("abbreviation", "")
-                                val logo = teamObj.optString("logo", null)
-                                    ?: teamObj.optJSONArray("logos")?.optJSONObject(0)?.optString("href", null)
-
-                                val dispName = location.ifEmpty { nickname }
-                                val isSec = isSecTeam(nickname, location, abbrev)
-
-                                val item = ApTeamRank(
-                                    rank = currentRank,
-                                    teamId = tId,
-                                    name = nickname,
-                                    displayName = dispName,
-                                    abbreviation = abbrev,
-                                    logoUrl = logo,
-                                    isSec = isSec
-                                )
-                                apTop20.add(item)
-
-                                if (tId.isNotEmpty()) apLookup[tId] = currentRank
-                                if (location.isNotEmpty()) apLookup[location.lowercase(Locale.ROOT)] = currentRank
-                                if (abbrev.isNotEmpty()) apLookup[abbrev.lowercase(Locale.ROOT)] = currentRank
-                                if (nickname.isNotEmpty()) apLookup[nickname.lowercase(Locale.ROOT)] = currentRank
+                                    if (currentRank <= 25) {
+                                        rankMap[tId] = currentRank
+                                        rankMap[tName.lowercase(Locale.ROOT)] = currentRank
+                                        rankMap[tAbbr.lowercase(Locale.ROOT)] = currentRank
+                                        if (currentRank <= 20) {
+                                            rankings.add(
+                                                ApTeamRank(
+                                                    rank = currentRank,
+                                                    name = tName,
+                                                    displayName = tDisplay,
+                                                    abbreviation = tAbbr,
+                                                    logoUrl = tLogo,
+                                                    isSec = isSec,
+                                                    teamId = tId
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
+            } catch (e: Throwable) {
+                // Ignore failure
             }
 
-            // 2. Fetch Scoreboard: START is today, END is today plus 7 days in YYYYMMDD
-            val cal = Calendar.getInstance()
-            val ymdFormat = SimpleDateFormat("yyyyMMdd", Locale.US)
-            val startDate = ymdFormat.format(cal.time)
-            cal.add(Calendar.DAY_OF_YEAR, 7)
-            val endDate = ymdFormat.format(cal.time)
-
-            val primaryScoreboardUrl = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?groups=80&limit=200&dates=$startDate-$endDate"
-            var scoreboardBody: String? = null
-
-            try {
-                val sbReq = Request.Builder()
-                    .url(primaryScoreboardUrl)
-                    .header("User-Agent", "MaZzeSportsTV/1.0")
-                    .build()
-                client.newCall(sbReq).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        scoreboardBody = resp.body?.string()
-                    }
-                }
-            } catch (e: Exception) {
-                // Will try fallback
-            }
-
-            // If range returned 400 or failed, fetch default current week scoreboard
-            if (scoreboardBody.isNullOrEmpty()) {
-                val fallbackUrl = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?groups=80&limit=200"
-                val fbReq = Request.Builder()
-                    .url(fallbackUrl)
-                    .header("User-Agent", "MaZzeSportsTV/1.0")
-                    .build()
-                client.newCall(fbReq).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        scoreboardBody = resp.body?.string()
-                    }
-                }
-            }
-
+            // 2. Fetch College Football scoreboard
             val games = mutableListOf<NcaaGame>()
-            if (!scoreboardBody.isNullOrEmpty()) {
-                val sbRoot = JSONObject(scoreboardBody!!)
-                val eventsArr = sbRoot.optJSONArray("events")
+            try {
+                val sbUrl = "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
+                val req = Request.Builder().url(sbUrl).header("User-Agent", "MaZzeSportsTV/1.0").build()
+                client.newCall(req).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val body = response.body?.string() ?: ""
+                        val root = JSONObject(body)
+                        val events = root.optJSONArray("events")
+                        if (events != null) {
+                            for (i in 0 until events.length()) {
+                                val event = events.optJSONObject(i) ?: continue
+                                val id = event.optString("id", "")
+                                val name = event.optString("name", "")
+                                val dateStr = event.optString("date", "")
 
-                if (eventsArr != null) {
-                    for (i in 0 until eventsArr.length()) {
-                        val ev = eventsArr.optJSONObject(i) ?: continue
-                        val evId = ev.optString("id", "ncaa_$i")
-                        val evName = ev.optString("name", "College Football Matchup")
-                        val dateStr = ev.optString("date", "")
+                                val comp = event.optJSONArray("competitions")?.optJSONObject(0) ?: continue
+                                val competitors = comp.optJSONArray("competitors") ?: continue
 
-                        val competitions = ev.optJSONArray("competitions")
-                        val comp = competitions?.optJSONObject(0) ?: continue
-                        val competitors = comp.optJSONArray("competitors") ?: continue
-                        if (competitors.length() < 2) continue
+                                var homeTeam = Team()
+                                var awayTeam = Team()
+                                var homeScore = ""
+                                var awayScore = ""
 
-                        var homeTeam = Team()
-                        var awayTeam = Team()
-                        var homeScore = "0"
-                        var awayScore = "0"
-                        var homeRank: Int? = null
-                        var awayRank: Int? = null
-                        var isHomeSec = false
-                        var isAwaySec = false
+                                for (c in 0 until competitors.length()) {
+                                    val compObj = competitors.optJSONObject(c) ?: continue
+                                    val homeAway = compObj.optString("homeAway", "")
+                                    val score = compObj.optString("score", "0")
+                                    val teamObj = compObj.optJSONObject("team")
+                                    val tId = teamObj?.optString("id", "") ?: ""
+                                    val tName = teamObj?.optString("displayName", "") ?: ""
+                                    val tAbbr = teamObj?.optString("abbreviation", "") ?: ""
+                                    val tLogo = teamObj?.optString("logo", "") ?: ""
+                                    val tColor = teamObj?.optString("color", "") ?: ""
+                                    val team = Team(tId, tName, tAbbr, tLogo, tColor)
 
-                        for (c in 0 until competitors.length()) {
-                            val compObj = competitors.optJSONObject(c) ?: continue
-                            val ha = compObj.optString("homeAway", "home")
-                            val score = compObj.optString("score", "0")
-                            val tObj = compObj.optJSONObject("team") ?: continue
+                                    if (homeAway == "home") {
+                                        homeTeam = team
+                                        homeScore = score
+                                    } else {
+                                        awayTeam = team
+                                        awayScore = score
+                                    }
+                                }
 
-                            val tId = tObj.optString("id", "")
-                            val location = tObj.optString("location", "")
-                            val tName = tObj.optString("name", "")
-                            val disp = location.ifEmpty { tObj.optString("displayName", tName) }
-                            val abbrev = tObj.optString("abbreviation", "")
-                            val logo = tObj.optString("logo", null)
+                                val statusObj = comp.optJSONObject("status")
+                                val typeObj = statusObj?.optJSONObject("type")
+                                val state = typeObj?.optString("state", "pre") ?: "pre"
+                                val shortDetail = typeObj?.optString("shortDetail", "") ?: ""
+                                val network = extractNetwork(comp)
 
-                            val team = Team(
-                                id = tId,
-                                displayName = disp,
-                                abbreviation = if (abbrev.isNotBlank()) abbrev else disp.take(3).uppercase(),
-                                logo = logo
-                            )
+                                val homeRank = rankMap[homeTeam.id] ?: rankMap[homeTeam.displayName.lowercase(Locale.ROOT)]
+                                val awayRank = rankMap[awayTeam.id] ?: rankMap[awayTeam.displayName.lowercase(Locale.ROOT)]
 
-                            // Lookup AP rank
-                            var rank: Int? = apLookup[tId]
-                                ?: apLookup[location.lowercase(Locale.ROOT)]
-                                ?: apLookup[abbrev.lowercase(Locale.ROOT)]
-                                ?: apLookup[tName.lowercase(Locale.ROOT)]
+                                val bestRank = minOf(homeRank ?: 999, awayRank ?: 999)
+                                val isSecMatch = isSecTeam(homeTeam.displayName, abbrev = homeTeam.abbreviation) ||
+                                        isSecTeam(awayTeam.displayName, abbrev = awayTeam.abbreviation)
 
-                            if (rank == null) {
-                                val cRank = compObj.optJSONObject("curatedRank")?.optInt("current", 99) ?: 99
-                                if (cRank in 1..20) rank = cRank
+                                val tier = when {
+                                    homeRank != null && awayRank != null && homeRank <= 25 && awayRank <= 25 -> 1
+                                    homeRank != null && homeRank <= 20 -> 2
+                                    awayRank != null && awayRank <= 20 -> 2
+                                    isSecMatch -> 3
+                                    else -> 4
+                                }
+
+                                val kickoffDisplay = formatKickoffDisplay(dateStr, state, shortDetail, awayScore, homeScore)
+
+                                games.add(
+                                    NcaaGame(
+                                        id = id,
+                                        name = name,
+                                        homeTeam = homeTeam,
+                                        awayTeam = awayTeam,
+                                        homeRank = homeRank,
+                                        awayRank = awayRank,
+                                        homeScore = homeScore,
+                                        awayScore = awayScore,
+                                        statusDetail = shortDetail,
+                                        state = state,
+                                        startTime = dateStr,
+                                        kickoffDisplay = kickoffDisplay,
+                                        network = network,
+                                        isSecMatch = isSecMatch,
+                                        tier = tier,
+                                        bestRank = bestRank
+                                    )
+                                )
                             }
-
-                            val isSec = isSecTeam(tName, location, abbrev)
-
-                            if (ha == "home") {
-                                homeTeam = team
-                                homeScore = score
-                                homeRank = rank
-                                isHomeSec = isSec
-                            } else {
-                                awayTeam = team
-                                awayScore = score
-                                awayRank = rank
-                                isAwaySec = isSec
-                            }
                         }
-
-                        val isSecMatch = isHomeSec || isAwaySec
-                        val hasTop20Team = (homeRank != null && homeRank <= 20) || (awayRank != null && awayRank <= 20)
-
-                        // Filter: "Show every game where at least one team is in the AP Top 20 or is an SEC team"
-                        if (!isSecMatch && !hasTop20Team) {
-                            continue
-                        }
-
-                        // Determine sorting tier
-                        val bestRank = minOf(homeRank ?: 99, awayRank ?: 99)
-                        val tier = when {
-                            isSecMatch && hasTop20Team -> 0 // SEC ranked game
-                            !isSecMatch && hasTop20Team -> 1 // Other ranked game
-                            else -> 2 // SEC unranked game
-                        }
-
-                        // Extract TV network
-                        var network = extractNetwork(comp)
-                        if (network.isBlank()) {
-                            network = if (isSecMatch) "SECN / ESPN" else "TV"
-                        }
-
-                        // Status & Date format
-                        val statusObj = comp.optJSONObject("status")
-                        val typeObj = statusObj?.optJSONObject("type")
-                        val state = typeObj?.optString("state", "pre") ?: "pre"
-                        val shortDetail = typeObj?.optString("shortDetail", "") ?: ""
-
-                        val kickoffDisplay = formatKickoffDisplay(dateStr, state, shortDetail, awayScore, homeScore)
-
-                        games.add(
-                            NcaaGame(
-                                id = evId,
-                                name = evName,
-                                homeTeam = homeTeam,
-                                awayTeam = awayTeam,
-                                homeRank = homeRank,
-                                awayRank = awayRank,
-                                homeScore = homeScore,
-                                awayScore = awayScore,
-                                state = state,
-                                statusDetail = shortDetail,
-                                startTime = dateStr,
-                                kickoffDisplay = kickoffDisplay,
-                                network = network,
-                                isSecMatch = isSecMatch,
-                                tier = tier,
-                                bestRank = bestRank
-                            )
-                        )
                     }
                 }
+            } catch (e: Throwable) {
+                // Ignore failure
             }
 
-            // Sort: SEC ranked games first (tier 0), then other ranked games by best rank (tier 1), then SEC unranked (tier 2)
-            games.sortWith(
+            val sortedGames = games.sortedWith(
                 compareBy<NcaaGame> { it.tier }
                     .thenBy { it.bestRank }
-                    .thenBy { it.startTime }
+                    .thenBy {
+                        when (it.state) {
+                            "in" -> 0
+                            "pre" -> 1
+                            else -> 2
+                        }
+                    }
             )
 
-            val updateTime = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
-            Result.success(
-                NcaaFootballData(
-                    apTop20 = apTop20,
-                    games = games,
-                    lastUpdated = updateTime
-                )
-            )
-        } catch (e: Exception) {
-            e.printStackTrace()
+            val nowFormatted = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date())
+            Result.success(NcaaFootballData(rankings, sortedGames, nowFormatted))
+        } catch (e: Throwable) {
             Result.failure(e)
         }
     }
 
-    private fun formatKickoffDisplay(
-        dateStr: String,
-        state: String,
-        shortDetail: String,
-        awayScore: String,
-        homeScore: String
-    ): String {
-        return when (state) {
-            "in" -> "$awayScore - $homeScore • $shortDetail"
-            "post" -> "Final • $awayScore - $homeScore"
-            else -> {
-                try {
-                    val date = isoFormat.parse(dateStr)
-                    if (date != null) {
-                        val localFormat = SimpleDateFormat("EEE • h:mm a", Locale.getDefault())
-                        localFormat.format(date)
-                    } else shortDetail.ifEmpty { "Upcoming" }
-                } catch (e: Exception) {
-                    shortDetail.ifEmpty { "Upcoming" }
-                }
+    private fun formatKickoffDisplay(dateStr: String, state: String, shortDetail: String, awayScore: String, homeScore: String): String {
+        if (state == "in") return "$awayScore - $homeScore • $shortDetail"
+        if (state == "post") return "Final • $awayScore - $homeScore"
+        return try {
+            val date = isoFormat.parse(dateStr)
+            if (date != null) {
+                val localFormat = SimpleDateFormat("EEE • h:mm a", Locale.getDefault())
+                localFormat.format(date)
+            } else {
+                shortDetail.ifBlank { "Upcoming" }
             }
+        } catch (e: Throwable) {
+            shortDetail.ifBlank { "Upcoming" }
         }
-    }
-
-    private fun extractNetwork(comp: org.json.JSONObject): String {
-        val arrays = listOfNotNull(comp.optJSONArray("broadcasts"), comp.optJSONArray("geoBroadcasts"))
-        for (arr in arrays) {
-            for (bIdx in 0 until arr.length()) {
-                val b = arr.optJSONObject(bIdx) ?: continue
-                val media = b.optJSONObject("media")
-                val shortName = media?.optString("shortName", "") ?: ""
-                if (shortName.isNotBlank()) return shortName
-                val names = b.optJSONArray("names")
-                if (names != null && names.length() > 0) {
-                    val n = names.optString(0, "")
-                    if (n.isNotBlank()) return n
-                }
-            }
-        }
-        return ""
     }
 }
