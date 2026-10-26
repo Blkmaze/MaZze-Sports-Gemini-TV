@@ -33,6 +33,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.Game
 import kotlinx.coroutines.delay
+import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 
 private val TvColorScheme = darkColorScheme(
     primary = TvOrangeFocus,
@@ -152,5 +166,97 @@ fun ScoreTickerBar(games: List<Game>, spoilerFree: Boolean, modifier: Modifier =
                 )
             }
         }
+    }
+}
+
+/** Scores Break: full-screen scoreboard shown on top of the video (press Menu on the remote). */
+object ScoresBreak {
+    var visible by mutableStateOf(false)
+}
+
+@Composable
+fun ScoresBreakOverlay(games: List<Game>, spoilerFree: Boolean) {
+    val live = games.filter { it.state == "in" }
+    val upcoming = games.filter { it.state == "pre" }
+    val finals = games.filter { it.state == "post" }
+    val ordered = (live + upcoming + finals).take(30)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xF2050B18))
+            .padding(32.dp)
+    ) {
+        Text(
+            text = "SCORES BREAK",
+            color = TvOrangeFocus,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = "Press Back to return to the video",
+            color = TvTextSecondary,
+            fontSize = 14.sp
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        if (ordered.isEmpty()) {
+            Text(text = "No games available right now", color = TvTextPrimary, fontSize = 18.sp)
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(ordered) { g -> ScoresBreakCard(g, spoilerFree) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScoresBreakCard(g: Game, spoilerFree: Boolean) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val isLive = g.state == "in"
+    val showScore = !spoilerFree && g.state != "pre"
+    val away = g.awayTeam.abbreviation.ifBlank { g.awayTeam.displayName }
+    val home = g.homeTeam.abbreviation.ifBlank { g.homeTeam.displayName }
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (focused) TvDarkCardElevated else TvDarkCard)
+            .border(2.dp, if (focused) TvOrangeFocus else Color.Transparent, RoundedCornerShape(12.dp))
+            .focusable(interactionSource = interaction)
+            .padding(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = g.league.uppercase(),
+                color = TvTextSecondary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            if (isLive) {
+                Text(text = "LIVE", color = TvLiveRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(text = away, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(text = if (showScore) g.awayScore else "", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(text = home, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(text = if (showScore) g.homeScore else "", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = g.statusDetail,
+            color = if (isLive) TvLimeAccent else TvTextSecondary,
+            fontSize = 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

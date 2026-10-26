@@ -34,6 +34,9 @@ import com.example.ui.components.TvNavigationRail
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.ScoreTickerBar
+import androidx.compose.ui.window.DialogProperties
+import com.example.ui.theme.ScoresBreak
+import com.example.ui.theme.ScoresBreakOverlay
 import com.example.ui.theme.TvDarkBackground
 import com.example.ui.theme.TvDarkSurface
 import com.example.ui.theme.TvOrangeFocus
@@ -47,6 +50,14 @@ import java.util.Date
 class MainActivity : ComponentActivity() {
 
     private val viewModel: TvMainViewModel by viewModels()
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_MENU) {
+            com.example.ui.theme.ScoresBreak.visible = !com.example.ui.theme.ScoresBreak.visible
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -240,6 +251,15 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                if (ScoresBreak.visible) {
+                    Dialog(
+                        onDismissRequest = { ScoresBreak.visible = false },
+                        properties = DialogProperties(usePlatformDefaultWidth = false)
+                    ) {
+                        ScoresBreakOverlay(games = games, spoilerFree = spoilerFree)
+                    }
+                }
+
 
                 // Startup crash report dialog if previous crash was captured
                 if (showStartupCrashDialog && !lastCrashReport.isNullOrBlank()) {
