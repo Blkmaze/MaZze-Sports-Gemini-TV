@@ -139,6 +139,8 @@ fun HomeScreen(
             val heroInteractionSource = remember { MutableInteractionSource() }
             val isHeroFocused by heroInteractionSource.collectIsFocusedAsState()
 
+
+            Column(modifier = Modifier.fillMaxWidth()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -220,12 +222,14 @@ fun HomeScreen(
                 }
 
                 }
+                } // end hero Box
 
-                // Overlay Controls & Info
+                // Controls & Info bar BELOW the preview so D-pad Down reaches the buttons
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
+                        .padding(top = 8.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .background(Color.Black.copy(alpha = 0.7f))
                         .padding(horizontal = 20.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
