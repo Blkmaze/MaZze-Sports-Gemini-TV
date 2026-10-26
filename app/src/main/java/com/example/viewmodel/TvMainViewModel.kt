@@ -463,13 +463,17 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         // 3. World Series and MLB playoffs
-        val isWorldSeries = combined.contains("world series") || (league == "mlb" && combined.contains("ws"))
+        val startMonth = game.startTime.substring(5, 7).toIntOrNull() ?: 0
+        val startDay = game.startTime.substring(8, 10).toIntOrNull() ?: 0
+        // ESPN event names are only team names, so detect the Fall Classic by date: MLB games after Oct 15 are the World Series
+        val isLateOctMlb = league == "mlb" && ((startMonth == 10 && startDay >= 15) || startMonth == 11)
+        val isWorldSeries = combined.contains("world series") || isLateOctMlb
         val isMlbPlayoffs = league == "mlb" && (isWorldSeries || combined.contains("playoff") ||
                 combined.contains("postseason") || combined.contains("alcs") || combined.contains("nlcs") ||
                 combined.contains("alds") || combined.contains("nlds"))
 
         if (isWorldSeries) {
-            score += 440_000L
+            score += 520_000L
         } else if (isMlbPlayoffs) {
             score += 400_000L
         } else if (league == "mlb") {
