@@ -175,6 +175,7 @@ class MainActivity : ComponentActivity() {
                                         onToggleSpoiler = { viewModel.toggleSpoilerReveal(it) },
                                         onExpandFullScreen = { viewModel.setFullScreenPlayer(true) },
                                         onNextChannel = { viewModel.cycleNextChannel() },
+                                        onPreviousChannel = { viewModel.cyclePreviousChannel() },
                                         onNavigateToSettings = { viewModel.setScreen(4) },
                                         onAddToMultiview = { title, candidates ->
                                             viewModel.addGameToMultiview(title, candidates)

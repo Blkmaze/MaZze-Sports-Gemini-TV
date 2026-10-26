@@ -60,6 +60,7 @@ fun HomeScreen(
     onToggleSpoiler: (String) -> Unit = {},
     onExpandFullScreen: () -> Unit = {},
     onNextChannel: () -> Unit = {},
+    onPreviousChannel: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
     onAddToMultiview: (String, List<Channel>) -> Int = { _, _ -> -1 },
     onWatchFullScreenChannel: (Channel) -> Unit = {},
@@ -92,7 +93,7 @@ fun HomeScreen(
     ) {
         // 1. Top Header Bar
         item {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -144,7 +145,7 @@ fun HomeScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(280.dp)
+                    .height(185.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(TvDarkSurface)
                     .border(
@@ -231,7 +232,7 @@ fun HomeScreen(
                         .padding(top = 8.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color.Black.copy(alpha = 0.7f))
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -259,6 +260,12 @@ fun HomeScreen(
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             TvFocusButton(
+                                text = "Back",
+                                icon = Icons.Default.SkipPrevious,
+                                onClick = onPreviousChannel
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            TvFocusButton(
                                 text = "Next Channel",
                                 icon = Icons.Default.SkipNext,
                                 onClick = onNextChannel
@@ -267,7 +274,7 @@ fun HomeScreen(
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(12.dp))
         }
 
         // 3. HOT THIS WEEK Trending Row (Top 10 Live & Marquee Matchups)
