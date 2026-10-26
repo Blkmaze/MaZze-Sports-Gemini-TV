@@ -258,6 +258,45 @@ fun SettingsScreen(
             }
         }
 
+        // Patio Mode (bigger text for viewing from far away)
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(TvDarkSurface)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Patio Mode",
+                                color = TvTextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Makes all text bigger so it is easy to read from across the patio",
+                                color = TvTextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                        TvFocusButton(
+                            text = if (PatioMode.enabled) "Enabled" else "Disabled",
+                            isPrimary = PatioMode.enabled,
+                            onClick = { PatioMode.toggle(context) }
+                        )
+                    }
+                }
+            }
+        }
+
+
+
         // 3. Last Crash Report Section
         item {
             Card(
@@ -398,3 +437,4 @@ fun SettingsScreen(
         }
     }
 }
+

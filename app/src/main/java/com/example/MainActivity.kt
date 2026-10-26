@@ -33,6 +33,7 @@ import com.example.ui.components.TvFocusButton
 import com.example.ui.components.TvNavigationRail
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.ScoreTickerBar
 import com.example.ui.theme.TvDarkBackground
 import com.example.ui.theme.TvDarkSurface
 import com.example.ui.theme.TvOrangeFocus
@@ -139,12 +140,8 @@ class MainActivity : ComponentActivity() {
                             )
 
                             // Main Content Area
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .background(TvDarkBackground)
-                            ) {
+                            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+ Box(modifier = Modifier.weight(1f).fillMaxWidth().background(TvDarkBackground)) {
                                 when (currentScreen) {
                                     0 -> HomeScreen(
                                         games = games,
@@ -238,6 +235,8 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                             }
+ ScoreTickerBar(games = games, spoilerFree = spoilerFree)
+ }
                         }
                     }
                 }
