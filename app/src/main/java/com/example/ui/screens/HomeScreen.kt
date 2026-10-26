@@ -150,14 +150,18 @@ fun HomeScreen(
                         color = if (isHeroFocused) TvOrangeFocus else Color.Transparent,
                         shape = RoundedCornerShape(16.dp)
                     )
-                    .focusable(interactionSource = heroInteractionSource)
-                    .clickable(
-                        interactionSource = heroInteractionSource,
-                        indication = null
-                    ) {
-                        onExpandFullScreen()
-                    }
             ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .focusable(interactionSource = heroInteractionSource)
+                        .clickable(
+                            interactionSource = heroInteractionSource,
+                            indication = null
+                        ) {
+                            onExpandFullScreen()
+                        }
+                ) {
                 if (channels.isEmpty()) {
                     // While channels are loading, display loading message
                     Box(
@@ -213,6 +217,8 @@ fun HomeScreen(
                             )
                         }
                     }
+                }
+
                 }
 
                 // Overlay Controls & Info
