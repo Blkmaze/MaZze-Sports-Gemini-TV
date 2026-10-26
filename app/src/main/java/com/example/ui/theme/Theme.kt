@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import com.example.model.Game
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -217,6 +218,8 @@ fun ScoresBreakOverlay(games: List<Game>, spoilerFree: Boolean) {
 private fun ScoresBreakCard(g: Game, spoilerFree: Boolean) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    val context = LocalContext.current
+    Reminders.load(context)
     val isLive = g.state == "in"
     val showScore = !spoilerFree && g.state != "pre"
     val away = g.awayTeam.abbreviation.ifBlank { g.awayTeam.displayName }
@@ -226,6 +229,9 @@ private fun ScoresBreakCard(g: Game, spoilerFree: Boolean) {
             .clip(RoundedCornerShape(12.dp))
             .background(if (focused) TvDarkCardElevated else TvDarkCard)
             .border(2.dp, if (focused) TvOrangeFocus else Color.Transparent, RoundedCornerShape(12.dp))
+            .clickable(interactionSource = interaction, indication = null) {
+                if (g.state == "pre") Reminders.toggle(context, g.id)
+            }
             .focusable(interactionSource = interaction)
             .padding(16.dp)
     ) {
@@ -258,5 +264,80 @@ private fun ScoresBreakCard(g: Game, spoilerFree: Boolean) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+        if (g.state == "pre") {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = if (Reminders.has(g.id)) "REMINDER ON (15 min before)" else "Press OK for a reminder",
+                color = if (Reminders.has(g.id)) TvOrangeFocus else TvTextMuted,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+/** Game reminders: saved game ids; a toast pops up about 15 minutes before kickoff while the app is open. */
+object Reminders {
+    val ids = androidx.compose.runtime.mutableStateListOf<String>()
+    private var loaded = false
+    val notified = mutableSetOf<String>()
+
+    fun load(context: Context) {
+        if (loaded) return
+        loaded = true
+        try {
+            val saved = context.getSharedPreferences("mazze_ui", Context.MODE_PRIVATE)
+                .getStringSet("reminder_ids", emptySet()) ?: emptySet()
+            ids.addAll(saved)
+        } catch (e: Throwable) {
+        }
+    }
+
+    fun has(id: String): Boolean = ids.contains(id)
+
+    fun toggle(context: Context, id: String) {
+        if (ids.contains(id)) ids.remove(id) else ids.add(id)
+        try {
+            context.getSharedPreferences("mazze_ui", Context.MODE_PRIVATE)
+                .edit().putStringSet("reminder_ids", ids.toSet()).apply()
+        } catch (e: Throwable) {
+        }
+    }
+}
+
+private fun minutesUntilStart(startTime: String): Long? {
+    return try {
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm", java.util.Locale.US)
+        fmt.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        val start = fmt.parse(startTime.take(16)) ?: return null
+        (start.time - System.currentTimeMillis()) / 60000L
+    } catch (e: Throwable) {
+        null
+    }
+}
+
+/** Put this once near the top of the screen. It checks reminders every 30 seconds. */
+@Composable
+fun ReminderWatcher(games: List<Game>) {
+    val context = LocalContext.current
+    LaunchedEffect(games) {
+        Reminders.load(context)
+        while (true) {
+            for (g in games) {
+                if (g.state != "pre" || !Reminders.has(g.id) || Reminders.notified.contains(g.id)) continue
+                val mins = minutesUntilStart(g.startTime) ?: continue
+                if (mins in -5..15) {
+                    Reminders.notified.add(g.id)
+                    val away = g.awayTeam.abbreviation.ifBlank { g.awayTeam.displayName }
+                    val home = g.homeTeam.abbreviation.ifBlank { g.homeTeam.displayName }
+                    val msg = "REMINDER: " + away + " @ " + home + (if (mins > 0) " starts in " + mins + " min" else " is starting now") + (if (g.network.isNotBlank()) " on " + g.network else "")
+                    try {
+                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+                    } catch (e: Throwable) {
+                    }
+                }
+            }
+            delay(30000)
+        }
     }
 }

@@ -251,6 +251,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                com.example.ui.theme.ReminderWatcher(games = games)
                 if (ScoresBreak.visible) {
                     Dialog(
                         onDismissRequest = { ScoresBreak.visible = false },
