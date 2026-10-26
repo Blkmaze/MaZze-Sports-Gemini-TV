@@ -12,7 +12,9 @@ import com.example.api.UpdaterRepository
 import com.example.model.*
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -298,6 +300,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
 
             val usedChannelIds = mutableSetOf<String>()
 
+            withContext(Dispatchers.Default) {
             for (i in 0 until 4) {
                 if (forceAll || currentMultiview.getOrNull(i) == null) {
                     val candidateGame = topGames.getOrNull(i)
@@ -322,6 +325,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
                 }
+            }
             }
 
             _multiviewChannels.value = currentMultiview

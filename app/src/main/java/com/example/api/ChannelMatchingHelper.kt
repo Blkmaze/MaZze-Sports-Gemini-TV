@@ -119,8 +119,8 @@ object ChannelMatchingHelper {
 
     private fun containsToken(text: String, token: String): Boolean {
         if (token.isBlank() || text.isBlank()) return false
-        val regex = Regex("(?:^|[^a-zA-Z0-9])${Regex.escape(token)}(?:$|[^a-zA-Z0-9])")
-        return regex.containsMatchIn(text) || text.contains(token)
+        // Plain substring check (identical result to the old regex-or-contains, without compiling a Regex per call)
+        return text.contains(token)
     }
 
     fun findCandidatesForGame(
