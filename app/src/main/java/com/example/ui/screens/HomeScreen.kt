@@ -132,40 +132,29 @@ fun HomeScreen(
                     .clip(RoundedCornerShape(16.dp))
                     .background(TvDarkSurface)
             ) {
-                val shouldPlayHero = isFirstFramePassed &&
-                        isHeroPlayerActive &&
-                        currentPlayingChannel != null &&
-                        !currentPlayingChannel.streamUrl.isNullOrBlank()
+                val shouldPlayHero = false
 
-                if (shouldPlayHero) {
-                    TvStreamPlayer(
-                        channel = currentPlayingChannel,
-                        isSoundActive = false,
-                        isFullScreen = false
-                    )
-                } else {
-                    // Safe Poster / Placeholder
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(TvDarkSurface),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.LiveTv,
-                                contentDescription = null,
-                                tint = TvOrangeFocus,
-                                modifier = Modifier.size(54.dp)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = currentPlayingChannel?.name ?: "Select a Game or Channel to Preview",
-                                color = TvTextPrimary,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                // Safe Poster / Placeholder (video starts only when Fullscreen or Watch Live is selected)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(TvDarkSurface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.LiveTv,
+                            contentDescription = null,
+                            tint = TvOrangeFocus,
+                            modifier = Modifier.size(54.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = currentPlayingChannel?.name ?: "Select a Game or Channel to Preview",
+                            color = TvTextPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
 

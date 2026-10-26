@@ -188,9 +188,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val list = playlistRepo.loadChannels()
                 _channels.value = list
-                if (_currentPlayingChannel.value == null && list.isNotEmpty()) {
-                    _currentPlayingChannel.value = list.firstOrNull()
-                }
+                // Do not auto-select or auto-play a channel on app launch
                 autoFillMultiviewTop20(forceAll = false)
             } catch (e: Throwable) {
                 // Keep existing channels if reload failed

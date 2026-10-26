@@ -8,16 +8,35 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.player.TvStreamPlayer
+import com.example.ui.components.TvFocusButton
 import com.example.ui.components.TvNavigationRail
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.TvDarkBackground
+import com.example.ui.theme.TvDarkSurface
+import com.example.ui.theme.TvOrangeFocus
+import com.example.ui.theme.TvTextSecondary
 import com.example.viewmodel.TvMainViewModel
 import java.io.File
 import java.io.PrintWriter
@@ -75,6 +94,9 @@ class MainActivity : ComponentActivity() {
                 val ncaaFootballData by viewModel.ncaaFootballData.collectAsStateWithLifecycle()
                 val channelSearchFilter by viewModel.channelSearchFilter.collectAsStateWithLifecycle()
                 val lastCrashReport by viewModel.lastCrashReport.collectAsStateWithLifecycle()
+                var showStartupCrashDialog by remember(lastCrashReport) {
+                    mutableStateOf(!lastCrashReport.isNullOrBlank())
+                }
 
                 // TV Back navigation handler
                 BackHandler(enabled = isFullScreen || currentScreen != 0) {
@@ -233,10 +255,81 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
+                }
+
+                // Startup crash report dialog if previous crash was captured
+                if (showStartupCrashDialog && !lastCrashReport.isNullOrBlank()) {
+                    Dialog(onDismissRequest = { showStartupCrashDialog = false }) {
+                        Box(
+                            modifier = Modifier
+                                .width(600.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(TvDarkSurface)
+                                .border(2.dp, TvOrangeFocus, RoundedCornerShape(16.dp))
+                                .padding(24.dp)
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Previous App Crash Detected",
+                                    color = Color.White,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "A crash stack trace was captured from a previous session:",
+                                    color = TvTextSecondary,
+                                    fontSize = 12.sp
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                val scrollState = rememberScrollState()
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(240.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(TvDarkBackground)
+                                        .padding(12.dp)
+                                        .verticalScroll(scrollState)
+                                ) {
+                                    Text(
+                                        text = lastCrashReport ?: "",
+                                        color = Color(0xFFFFB4AB),
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        lineHeight = 16.sp
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    TvFocusButton(
+                                        text = "Close",
+                                        icon = Icons.Default.Close,
+                                        onClick = { showStartupCrashDialog = false }
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    TvFocusButton(
+                                        text = "Clear",
+                                        icon = Icons.Default.Delete,
+                                        isPrimary = true,
+                                        onClick = {
+                                            viewModel.clearCrashReport()
+                                            showStartupCrashDialog = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
-    }
-
     }
 
     override fun onStop() {
