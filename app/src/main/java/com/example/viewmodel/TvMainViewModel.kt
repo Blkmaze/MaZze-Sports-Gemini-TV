@@ -103,8 +103,13 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     private val _lastCrashReport = MutableStateFlow<String?>(null)
     val lastCrashReport: StateFlow<String?> = _lastCrashReport.asStateFlow()
 
+    private val _hotThisWeekGames = MutableStateFlow<List<Game>>(emptyList())
+    val hotThisWeekGames: StateFlow<List<Game>> = _hotThisWeekGames.asStateFlow()
+
     private var pollJob: Job? = null
     private var ncaaPollJob: Job? = null
+    private var weekFetchJob: Job? = null
+    private var cachedWeekGames: List<Game> = emptyList()
     private val timeFormat = SimpleDateFormat("h:mm:ss a", Locale.getDefault())
 
     init {
@@ -116,6 +121,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         loadChannels()
         startScoreboardPolling()
         startNcaaPolling()
+        startWeekScoreboardPolling()
     }
 
     fun loadCrashReport() {
@@ -358,7 +364,172 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(exceptionHandler) {
             fetchScoreboards()
             fetchNcaaFootball()
+            fetchWeekScoreboards()
         }
+    }
+
+    private fun startWeekScoreboardPolling() {
+        weekFetchJob?.cancel()
+        weekFetchJob = viewModelScope.launch(exceptionHandler) {
+            while (true) {
+                fetchWeekScoreboards()
+                delay(10 * 60 * 1000L) // Refreshed about every 10 minutes
+            }
+        }
+    }
+
+    private suspend fun fetchWeekScoreboards() {
+        try {
+            val result = espnRepo.fetchWeekScoreboards()
+            result.onSuccess { games ->
+                cachedWeekGames = games
+                recomputeHotGames()
+            }
+        } catch (e: Throwable) {
+            // Failures ignored safely
+        }
+    }
+
+    private fun recomputeHotGames() {
+        viewModelScope.launch(Dispatchers.Default + exceptionHandler) {
+            val todayGames = _games.value
+            val weekGames = cachedWeekGames
+            val ncaaRankedGames = _ncaaFootballData.value.games
+                .filter { it.homeRank != null || it.awayRank != null || it.isSecMatch }
+                .map { ncaa ->
+                    Game(
+                        id = ncaa.id,
+                        name = ncaa.name,
+                        shortName = "${ncaa.awayTeam.abbreviation} @ ${ncaa.homeTeam.abbreviation}",
+                        sport = "football",
+                        league = "CFB",
+                        homeTeam = ncaa.homeTeam,
+                        awayTeam = ncaa.awayTeam,
+                        homeScore = ncaa.homeScore,
+                        awayScore = ncaa.awayScore,
+                        statusDetail = ncaa.statusDetail.ifBlank { ncaa.kickoffDisplay },
+                        state = ncaa.state,
+                        startTime = ncaa.startTime,
+                        network = ncaa.network
+                    )
+                }
+
+            val combined = (todayGames + weekGames + ncaaRankedGames)
+                .distinctBy { it.id.ifBlank { "${it.homeTeam.displayName}-${it.awayTeam.displayName}-${it.startTime}" } }
+                .filter { it.state != "post" } // Live or upcoming only
+
+            val hotGames = combined
+                .sortedWith(
+                    compareByDescending<Game> { computeGameHotScore(it) }
+                        .thenBy { it.startTime }
+                )
+                .take(10)
+
+            _hotThisWeekGames.value = hotGames
+        }
+    }
+
+    private fun computeGameHotScore(game: Game): Long {
+        var score = 0L
+
+        // 1. LIVE games first (highest priority)
+        val isLive = game.state.equals("in", ignoreCase = true)
+        if (isLive) {
+            score += 1_000_000L
+        }
+
+        val name = game.name.lowercase(Locale.ROOT)
+        val shortName = game.shortName.lowercase(Locale.ROOT)
+        val league = game.league.lowercase(Locale.ROOT)
+        val home = game.homeTeam.displayName.lowercase(Locale.ROOT)
+        val away = game.awayTeam.displayName.lowercase(Locale.ROOT)
+        val network = game.network.lowercase(Locale.ROOT)
+        val combined = "$name $shortName $home $away $league $network"
+
+        // 2. Monday Night Football, Thursday Night Football, Sunday Night Football
+        val isMnf = combined.contains("monday night football") || combined.contains("mnf") ||
+                (league == "nfl" && (network.contains("espn") || combined.contains("monday")))
+        val isSnf = combined.contains("sunday night football") || combined.contains("snf") ||
+                (league == "nfl" && (network.contains("nbc") || combined.contains("sunday night")))
+        val isTnf = combined.contains("thursday night football") || combined.contains("tnf") ||
+                (league == "nfl" && (network.contains("prime") || combined.contains("thursday")))
+
+        if (isMnf) {
+            score += 500_000L
+        } else if (isSnf) {
+            score += 480_000L
+        } else if (isTnf) {
+            score += 460_000L
+        }
+
+        // 3. World Series and MLB playoffs
+        val isWorldSeries = combined.contains("world series") || (league == "mlb" && combined.contains("ws"))
+        val isMlbPlayoffs = league == "mlb" && (isWorldSeries || combined.contains("playoff") ||
+                combined.contains("postseason") || combined.contains("alcs") || combined.contains("nlcs") ||
+                combined.contains("alds") || combined.contains("nlds"))
+
+        if (isWorldSeries) {
+            score += 440_000L
+        } else if (isMlbPlayoffs) {
+            score += 400_000L
+        } else if (league == "mlb") {
+            score += 120_000L
+        }
+
+        // 4. WNBA Finals
+        val isWnbaFinals = league == "wnba" && (combined.contains("finals") || combined.contains("championship"))
+        if (isWnbaFinals) {
+            score += 380_000L
+        } else if (league == "wnba") {
+            score += 110_000L
+        }
+
+        // 5. NBA season-opening matchups and rivalry or big-market games (Lakers, Warriors, Celtics, Knicks, etc.)
+        if (league == "nba") {
+            val bigMarketTeams = listOf(
+                "lakers", "warriors", "celtics", "knicks", "heat", "bucks",
+                "nuggets", "76ers", "suns", "mavericks", "clippers"
+            )
+            val homeBig = bigMarketTeams.any { home.contains(it) }
+            val awayBig = bigMarketTeams.any { away.contains(it) }
+            val isOpener = combined.contains("opening night") || combined.contains("season opener") ||
+                    combined.contains("kia nba tip-off") || combined.contains("tip-off")
+
+            var nbaScore = 200_000L
+            if (isOpener) nbaScore += 100_000L
+            if (homeBig && awayBig) {
+                nbaScore += 80_000L
+            } else if (homeBig || awayBig) {
+                nbaScore += 40_000L
+            }
+            score += nbaScore
+        }
+
+        // 6. NFL games (general) and ranked NCAA football games
+        if (league == "nfl" && !isMnf && !isSnf && !isTnf) {
+            score += 180_000L
+        }
+        if (league == "cfb" || league.contains("college")) {
+            val isRanked = combined.contains("#") ||
+                    (game.homeTeam.displayName.startsWith("#") || game.awayTeam.displayName.startsWith("#"))
+            if (isRanked) {
+                score += 170_000L
+            } else {
+                score += 90_000L
+            }
+        }
+
+        // 7. NHL
+        if (league == "nhl") {
+            score += 80_000L
+        }
+
+        // 8. Other sports
+        if (score == 0L || (isLive && score == 1_000_000L)) {
+            score += 40_000L
+        }
+
+        return score
     }
 
     private suspend fun fetchScoreboards() {
@@ -371,6 +542,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
                 if (_currentPlayingChannel.value == null) {
                     autoPickHeroChannel()
                 }
+                recomputeHotGames()
             }.onFailure {
                 _isOffline.value = true
             }
@@ -387,6 +559,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
                 if (_currentPlayingChannel.value == null) {
                     autoPickHeroChannel()
                 }
+                recomputeHotGames()
             }
         } catch (e: Throwable) {}
     }

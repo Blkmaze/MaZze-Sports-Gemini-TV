@@ -45,6 +45,7 @@ data class GameActionMenuData(
 @Composable
 fun HomeScreen(
     games: List<Game>,
+    hotThisWeekGames: List<Game> = emptyList(),
     channels: List<Channel>,
     ncaaFootballData: NcaaFootballData,
     currentPlayingChannel: Channel?,
@@ -259,7 +260,57 @@ fun HomeScreen(
             Spacer(modifier = Modifier.height(24.dp))
         }
 
-        // 3. AP Top 20 Football Rankings Row
+        // 3. HOT THIS WEEK Trending Row (Top 10 Live & Marquee Matchups)
+        if (hotThisWeekGames.isNotEmpty()) {
+            item {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Whatshot,
+                        contentDescription = null,
+                        tint = TvOrangeFocus,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "HOT THIS WEEK",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Top 10 Live & Marquee Matchups",
+                        color = TvTextMuted,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    items(hotThisWeekGames) { game ->
+                        HotGameCard(
+                            game = game,
+                            onClick = {
+                                val candidates = ChannelMatchingHelper.findCandidatesForGame(game, channels)
+                                selectedGameActionMenu = GameActionMenuData(
+                                    title = "${game.awayTeam.displayName} @ ${game.homeTeam.displayName}",
+                                    candidates = candidates,
+                                    network = game.network
+                                )
+                            }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+
+        // 4. AP Top 20 Football Rankings Row
         if (ncaaFootballData.apTop20.isNotEmpty()) {
             item {
                 Text(

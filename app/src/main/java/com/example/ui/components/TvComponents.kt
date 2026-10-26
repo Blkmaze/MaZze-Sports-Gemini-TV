@@ -39,6 +39,7 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 @Composable
 fun TvFocusCard(
@@ -364,6 +365,140 @@ fun GameScoreCard(
                         modifier = Modifier.clickable { onToggleSpoiler() }
                     )
                 }
+            }
+        }
+    }
+}
+
+fun formatGameSchedule(startTime: String, statusDetail: String): String {
+    if (startTime.isNotBlank()) {
+        try {
+            val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val cleanStr = if (startTime.length >= 16) startTime.substring(0, 16) else startTime
+            val date = isoFormat.parse(cleanStr)
+            if (date != null) {
+                val displayFormat = SimpleDateFormat("EEE • h:mm a", Locale.getDefault())
+                return displayFormat.format(date)
+            }
+        } catch (e: Throwable) {
+            // Ignore
+        }
+    }
+    return statusDetail.ifBlank { "Upcoming" }
+}
+
+@Composable
+fun HotGameCard(
+    game: Game,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isLive = game.state.equals("in", ignoreCase = true)
+    val scheduleText = formatGameSchedule(game.startTime, game.statusDetail)
+
+    TvFocusCard(
+        onClick = onClick,
+        modifier = modifier.width(260.dp),
+        shape = RoundedCornerShape(12.dp)
+    ) { isFocused ->
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            // Header: League & Status / Schedule
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = game.league,
+                        color = TvLimeAccent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(TvOrangeFocus.copy(alpha = 0.2f))
+                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            text = "HOT",
+                            color = TvOrangeFocus,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+
+                if (isLive) {
+                    LiveBadge()
+                } else {
+                    Text(
+                        text = scheduleText,
+                        color = TvTextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Away Team
+            TeamScoreRow(
+                teamName = game.awayTeam.displayName,
+                teamLogo = game.awayTeam.logo,
+                score = if (isLive) game.awayScore else ""
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Home Team
+            TeamScoreRow(
+                teamName = game.homeTeam.displayName,
+                teamLogo = game.homeTeam.logo,
+                score = if (isLive) game.homeScore else ""
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Footer: Network Badge and action hint
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (game.network.isNotBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color.White.copy(alpha = 0.12f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = game.network,
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                } else {
+                    Spacer(modifier = Modifier.width(1.dp))
+                }
+
+                Text(
+                    text = if (isLive) "Watch Live" else "Match Options",
+                    color = TvOrangeFocus,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }

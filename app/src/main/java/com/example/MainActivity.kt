@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
                 val games by viewModel.games.collectAsStateWithLifecycle()
+                val hotThisWeekGames by viewModel.hotThisWeekGames.collectAsStateWithLifecycle()
                 val channels by viewModel.channels.collectAsStateWithLifecycle()
                 val currentPlayingChannel by viewModel.currentPlayingChannel.collectAsStateWithLifecycle()
                 val isFullScreen by viewModel.isFullScreenPlayer.collectAsStateWithLifecycle()
@@ -147,6 +148,7 @@ class MainActivity : ComponentActivity() {
                                 when (currentScreen) {
                                     0 -> HomeScreen(
                                         games = games,
+                                        hotThisWeekGames = hotThisWeekGames,
                                         channels = channels,
                                         ncaaFootballData = ncaaFootballData,
                                         currentPlayingChannel = currentPlayingChannel,

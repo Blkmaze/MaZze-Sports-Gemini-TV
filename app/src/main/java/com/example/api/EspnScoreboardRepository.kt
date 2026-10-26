@@ -12,6 +12,7 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -70,6 +71,46 @@ class EspnScoreboardRepository(
                 }
             }
             Result.success(sortGames(allGames))
+        } catch (e: Throwable) {
+            Result.failure(e)
+        }
+    }
+
+    val weekLeagues: List<LeagueTarget> = listOf(
+        LeagueTarget("football", "nfl", "NFL"),
+        LeagueTarget("baseball", "mlb", "MLB"),
+        LeagueTarget("basketball", "wnba", "WNBA"),
+        LeagueTarget("basketball", "nba", "NBA"),
+        LeagueTarget("hockey", "nhl", "NHL")
+    )
+
+    suspend fun fetchWeekScoreboards(): Result<List<Game>> = withContext(Dispatchers.IO) {
+        try {
+            val allGames = mutableListOf<Game>()
+            val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+            val ymd = SimpleDateFormat("yyyyMMdd", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val startDate = ymd.format(cal.time)
+            cal.add(Calendar.DAY_OF_YEAR, 7)
+            val endDate = ymd.format(cal.time)
+            val dateRange = "$startDate-$endDate"
+
+            for (target in weekLeagues) {
+                try {
+                    val url = "https://site.api.espn.com/apis/site/v2/sports/${target.sport}/${target.league}/scoreboard?dates=$dateRange"
+                    val req = Request.Builder().url(url).header("User-Agent", "MaZzeSportsTV/1.0").build()
+                    client.newCall(req).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val body = response.body?.string() ?: ""
+                            allGames.addAll(parseEspnScoreboard(body, target))
+                        }
+                    }
+                } catch (e: Throwable) {
+                    // Safe swallow per league
+                }
+            }
+            Result.success(allGames)
         } catch (e: Throwable) {
             Result.failure(e)
         }
