@@ -67,6 +67,13 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     var selectedGameActionMenu by remember { mutableStateOf<GameActionMenuData?>(null) }
+    val appVersionLabel = remember {
+        try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
 
     // First-frame gate: delay ~1500 ms after first frame before hero starts playing so launch does not stall
     var isFirstFramePassed by remember { mutableStateOf(false) }
@@ -92,7 +99,7 @@ fun HomeScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "MaZze Sports TV",
+                        text = if (appVersionLabel.isNotBlank()) "MaZze Sports TV  ($appVersionLabel)" else "MaZze Sports TV",
                         color = Color.White,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Black
