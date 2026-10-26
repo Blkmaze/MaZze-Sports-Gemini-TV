@@ -257,18 +257,21 @@ fun HomeScreen(
                     Column {
                         if (currentPlayingChannel != null) {
                             TvFocusButton(
+                                modifier = Modifier.fillMaxWidth(0.8f),
                                 text = "Watch Full Screen",
                                 icon = Icons.Default.Fullscreen,
                                 onClick = { onWatchFullScreenChannel(currentPlayingChannel) }
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             TvFocusButton(
+                                modifier = Modifier.fillMaxWidth(0.8f),
                                 text = "Back",
                                 icon = Icons.Default.SkipPrevious,
                                 onClick = onPreviousChannel
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             TvFocusButton(
+                                modifier = Modifier.fillMaxWidth(0.8f),
                                 text = "Next Channel",
                                 icon = Icons.Default.SkipNext,
                                 onClick = onNextChannel
