@@ -213,16 +213,18 @@ fun ChannelListItem(
                     else -> TvDarkSurface
                 }
             )
-            .focusable(interactionSource = interactionSource)
-            .clickable(interactionSource = interactionSource, indication = null) {
-                onSelect()
-            }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .focusable(interactionSource = interactionSource)
+                .clickable(interactionSource = interactionSource, indication = null) {
+                    onSelect()
+                },
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
@@ -250,13 +252,11 @@ fun ChannelListItem(
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onToggleFav) {
-                Icon(
-                    imageVector = if (channel.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
-                    contentDescription = "Favorite",
-                    tint = if (channel.isFavorite) TvOrangeFocus else TvTextSecondary
-                )
-            }
+            TvFocusButton(
+                text = if (channel.isFavorite) "Favorited" else "Favorite",
+                icon = if (channel.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
+                onClick = onToggleFav
+            )
             Spacer(modifier = Modifier.width(8.dp))
             TvFocusButton(
                 text = "Watch",
