@@ -87,28 +87,29 @@ class EspnScoreboardRepository(
     suspend fun fetchWeekScoreboards(): Result<List<Game>> = withContext(Dispatchers.IO) {
         try {
             val allGames = mutableListOf<Game>()
-            val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+            // ESPN rejects multi-day ranges for some leagues (HTTP 400), so request one day at a time (US Eastern dates)
             val ymd = SimpleDateFormat("yyyyMMdd", Locale.US).apply {
-                timeZone = TimeZone.getTimeZone("UTC")
+                timeZone = TimeZone.getTimeZone("America/New_York")
             }
-            val startDate = ymd.format(cal.time)
-            cal.add(Calendar.DAY_OF_YEAR, 7)
-            val endDate = ymd.format(cal.time)
-            val dateRange = "$startDate-$endDate"
+            val cal = Calendar.getInstance(TimeZone.getTimeZone("America/New_York"))
 
-            for (target in weekLeagues) {
-                try {
-                    val url = "https://site.api.espn.com/apis/site/v2/sports/${target.sport}/${target.league}/scoreboard?dates=$dateRange"
-                    val req = Request.Builder().url(url).header("User-Agent", "MaZzeSportsTV/1.0").build()
-                    client.newCall(req).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val body = response.body?.string() ?: ""
-                            allGames.addAll(parseEspnScoreboard(body, target))
+            for (dayOffset in 0 until 7) {
+                val dateParam = ymd.format(cal.time)
+                for (target in weekLeagues) {
+                    try {
+                        val url = "https://site.api.espn.com/apis/site/v2/sports/${target.sport}/${target.league}/scoreboard?dates=$dateParam"
+                        val req = Request.Builder().url(url).header("User-Agent", "MaZzeSportsTV/1.0").build()
+                        client.newCall(req).execute().use { response ->
+                            if (response.isSuccessful) {
+                                val body = response.body?.string() ?: ""
+                                allGames.addAll(parseEspnScoreboard(body, target))
+                            }
                         }
+                    } catch (e: Throwable) {
+                        // Safe swallow per league/day
                     }
-                } catch (e: Throwable) {
-                    // Safe swallow per league
                 }
+                cal.add(Calendar.DAY_OF_YEAR, 1)
             }
             Result.success(allGames)
         } catch (e: Throwable) {
