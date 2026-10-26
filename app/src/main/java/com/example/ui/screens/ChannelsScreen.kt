@@ -181,7 +181,7 @@ fun ChannelsScreen(
                     ChannelListItem(
                         channel = ch,
                         isSelected = selectedChannel?.id == ch.id,
-                        onSelect = { onChannelSelected(ch) },
+                        onSelect = { onChannelSelected(ch); onExpandFullScreen(ch) },
                         onToggleFav = { onToggleFavorite(ch.id) },
                         onPlayFullscreen = { onExpandFullScreen(ch) }
                     )
