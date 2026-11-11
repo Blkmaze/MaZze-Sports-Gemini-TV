@@ -89,7 +89,7 @@ fun HomeScreen(
             .fillMaxSize()
             .background(TvDarkBackground)
             .padding(horizontal = 24.dp),
-        contentPadding = PaddingValues(bottom = 32.dp)
+        contentPadding = PaddingValues(bottom = 68.dp) // 32.dp + 36.dp for SCORES ticker bar
     ) {
         // 1. Top Header Bar
         item {

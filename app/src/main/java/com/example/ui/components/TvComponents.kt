@@ -379,7 +379,7 @@ fun formatGameSchedule(startTime: String, statusDetail: String): String {
             val cleanStr = if (startTime.length >= 16) startTime.substring(0, 16) else startTime
             val date = isoFormat.parse(cleanStr)
             if (date != null) {
-                val displayFormat = SimpleDateFormat("EEE • h:mm a", Locale.getDefault())
+                val displayFormat = SimpleDateFormat("EEE h:mm a", Locale.getDefault())
                 return displayFormat.format(date)
             }
         } catch (e: Throwable) {
@@ -400,26 +400,32 @@ fun HotGameCard(
 
     TvFocusCard(
         onClick = onClick,
-        modifier = modifier.width(260.dp),
+        modifier = modifier
+            .width(260.dp)
+            .height(136.dp),
         shape = RoundedCornerShape(12.dp)
     ) { isFocused ->
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Header: League & Status / Schedule
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                // (2) League/network row: single line (maxLines = 1) with ellipsis, taking remaining width (weight 1f)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val leagueNetwork = if (game.network.isNotBlank()) "${game.league} · ${game.network}" else game.league
                     Text(
-                        text = if (game.network.isNotBlank()) game.league + " · " + game.network else game.league,
+                        text = leagueNetwork,
                         color = TvLimeAccent,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Box(
@@ -435,37 +441,66 @@ fun HotGameCard(
                             fontWeight = FontWeight.Black
                         )
                     }
+                    if (isLive) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        LiveBadge()
+                    }
                 }
 
-                if (isLive) {
-                    LiveBadge()
-                } else {
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // (3) Day/time text row under league label: single line (maxLines = 1, softWrap = false) & TV network badge
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = scheduleText,
-                        color = TvTextSecondary,
+                        text = if (isLive) (if (game.statusDetail.isNotBlank()) game.statusDetail else "LIVE") else scheduleText,
+                        color = if (isLive) TvLiveRed else TvTextSecondary,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
+
+                    if (game.network.isNotBlank()) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(TvDarkCardElevated)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = game.network,
+                                color = TvTextPrimary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            // (4) Team names & scores: single line each with ellipsis inside card
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TeamScoreRow(
+                    teamName = game.awayTeam.displayName,
+                    teamLogo = game.awayTeam.logo,
+                    score = if (isLive) game.awayScore else ""
+                )
 
-            // Away Team
-            TeamScoreRow(
-                teamName = game.awayTeam.displayName,
-                teamLogo = game.awayTeam.logo,
-                score = if (isLive) game.awayScore else ""
-            )
-
-            Spacer(modifier = Modifier.height(2.dp))
-
-            // Home Team
-            TeamScoreRow(
-                teamName = game.homeTeam.displayName,
-                teamLogo = game.homeTeam.logo,
-                score = if (isLive) game.homeScore else ""
-            )
+                TeamScoreRow(
+                    teamName = game.homeTeam.displayName,
+                    teamLogo = game.homeTeam.logo,
+                    score = if (isLive) game.homeScore else ""
+                )
+            }
         }
     }
 }
