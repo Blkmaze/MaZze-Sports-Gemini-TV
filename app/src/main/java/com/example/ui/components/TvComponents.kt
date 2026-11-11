@@ -82,7 +82,8 @@ fun TvFocusButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
-    isPrimary: Boolean = false
+    isPrimary: Boolean = false,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
@@ -104,7 +105,7 @@ fun TvFocusButton(
             )
             .focusable(interactionSource = interactionSource)
             .clickable(interactionSource = interactionSource, indication = null) { onClick() }
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(contentPadding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {
@@ -115,13 +116,16 @@ fun TvFocusButton(
                 tint = contentColor,
                 modifier = Modifier.size(18.dp)
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
         }
         Text(
             text = text,
             color = contentColor,
             fontWeight = if (isFocused) FontWeight.Bold else FontWeight.SemiBold,
-            fontSize = 14.sp
+            fontSize = 13.sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -283,16 +287,20 @@ fun GameScoreCard(
     val isLive = game.state == "in"
     val isFinal = game.state == "post"
     val hideScores = spoilerFree && !isSpoilerRevealed && (isLive || isFinal)
+    val scheduleText = formatGameSchedule(game.startTime, game.statusDetail)
 
     TvFocusCard(
         onClick = onClick,
-        modifier = modifier.width(260.dp),
+        modifier = modifier
+            .width(260.dp)
+            .height(136.dp),
         shape = RoundedCornerShape(12.dp)
     ) { isFocused ->
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp)
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
             // Header: League & Status
             Row(
@@ -304,54 +312,81 @@ fun GameScoreCard(
                     text = game.league,
                     color = TvLimeAccent,
                     fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
+                Spacer(modifier = Modifier.width(6.dp))
                 if (isLive) {
-                    LiveBadge()
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LiveBadge()
+                        if (game.statusDetail.isNotBlank()) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = game.statusDetail,
+                                color = TvLiveRed,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 } else {
                     Text(
-                        text = if (isFinal) "FINAL" else game.statusDetail,
+                        text = if (isFinal) "FINAL" else scheduleText,
                         color = TvTextSecondary,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            // Teams & Scores
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                TeamScoreRow(
+                    teamName = game.awayTeam.displayName,
+                    teamLogo = game.awayTeam.logo,
+                    score = if (hideScores) "•" else game.awayScore,
+                    isWinner = isFinal && (game.awayScore.toIntOrNull() ?: 0) > (game.homeScore.toIntOrNull() ?: 0)
+                )
+                TeamScoreRow(
+                    teamName = game.homeTeam.displayName,
+                    teamLogo = game.homeTeam.logo,
+                    score = if (hideScores) "•" else game.homeScore,
+                    isWinner = isFinal && (game.homeScore.toIntOrNull() ?: 0) > (game.awayScore.toIntOrNull() ?: 0)
+                )
+            }
 
-            // Away Team
-            TeamScoreRow(
-                teamName = game.awayTeam.displayName,
-                teamLogo = game.awayTeam.logo,
-                score = if (hideScores) "•" else game.awayScore,
-                isWinner = isFinal && (game.awayScore.toIntOrNull() ?: 0) > (game.homeScore.toIntOrNull() ?: 0)
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Home Team
-            TeamScoreRow(
-                teamName = game.homeTeam.displayName,
-                teamLogo = game.homeTeam.logo,
-                score = if (hideScores) "•" else game.homeScore,
-                isWinner = isFinal && (game.homeScore.toIntOrNull() ?: 0) > (game.awayScore.toIntOrNull() ?: 0)
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Footer: Network / Match hint
+            // Footer: Network / Match hint & Spoiler toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (game.network.isNotBlank()) {
-                    Text(
-                        text = game.network,
-                        color = TvTextMuted,
-                        fontSize = 11.sp
-                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(TvDarkCardElevated)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = game.network,
+                            color = TvTextMuted,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 } else {
                     Spacer(modifier = Modifier.width(1.dp))
                 }
@@ -362,6 +397,8 @@ fun GameScoreCard(
                         color = TvOrangeFocus,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.clickable { onToggleSpoiler() }
                     )
                 }
@@ -541,15 +578,21 @@ fun TeamScoreRow(
                 fontSize = 13.sp,
                 fontWeight = if (isWinner) FontWeight.Bold else FontWeight.Medium,
                 maxLines = 1,
+                softWrap = false,
                 overflow = TextOverflow.Ellipsis
             )
         }
-        Text(
-            text = score,
-            color = if (isWinner) TvOrangeFocus else TvTextPrimary,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold
-        )
+        if (score.isNotBlank()) {
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = score,
+                color = if (isWinner) TvOrangeFocus else TvTextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
     }
 }
 
@@ -561,13 +604,15 @@ fun ApTop20Card(
 ) {
     TvFocusCard(
         onClick = onClick,
-        modifier = modifier.width(190.dp),
+        modifier = modifier
+            .width(200.dp)
+            .height(58.dp),
         shape = RoundedCornerShape(10.dp)
     ) { isFocused ->
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
+                .fillMaxSize()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
@@ -581,17 +626,23 @@ fun ApTop20Card(
                     text = "#${rankItem.rank}",
                     color = if (rankItem.isSec) Color.Black else Color.White,
                     fontWeight = FontWeight.Black,
-                    fontSize = 11.sp
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
             Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center
+            ) {
                 Text(
                     text = rankItem.displayName,
                     color = TvTextPrimary,
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
                     maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis
                 )
                 if (rankItem.isSec) {
@@ -599,7 +650,9 @@ fun ApTop20Card(
                         text = "SEC",
                         color = TvLimeAccent,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 10.sp
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }

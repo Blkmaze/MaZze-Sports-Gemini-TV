@@ -132,7 +132,7 @@ fun HomeScreen(
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(10.dp))
         }
 
         // 2. Hero Live Preview Section
@@ -140,109 +140,111 @@ fun HomeScreen(
             val heroInteractionSource = remember { MutableInteractionSource() }
             val isHeroFocused by heroInteractionSource.collectIsFocusedAsState()
 
-
             Row(
-                modifier = Modifier.fillMaxWidth().height(260.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-            Box(
                 modifier = Modifier
-                    .fillMaxHeight()
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(TvDarkSurface)
-                    .border(
-                        width = if (isHeroFocused) 3.dp else 0.dp,
-                        color = if (isHeroFocused) TvOrangeFocus else Color.Transparent,
-                        shape = RoundedCornerShape(16.dp)
-                    )
+                    .fillMaxWidth()
+                    .height(205.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .focusable(interactionSource = heroInteractionSource)
-                        .clickable(
-                            interactionSource = heroInteractionSource,
-                            indication = null
-                        ) {
-                            onExpandFullScreen()
-                        }
+                        .fillMaxHeight()
+                        .aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(TvDarkSurface)
+                        .border(
+                            width = if (isHeroFocused) 3.dp else 0.dp,
+                            color = if (isHeroFocused) TvOrangeFocus else Color.Transparent,
+                            shape = RoundedCornerShape(14.dp)
+                        )
                 ) {
-                if (channels.isEmpty()) {
-                    // While channels are loading, display loading message
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(TvDarkSurface),
-                        contentAlignment = Alignment.Center
+                            .focusable(interactionSource = heroInteractionSource)
+                            .clickable(
+                                interactionSource = heroInteractionSource,
+                                indication = null
+                            ) {
+                                onExpandFullScreen()
+                            }
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(
-                                color = TvOrangeFocus,
-                                modifier = Modifier.size(36.dp),
-                                strokeWidth = 3.dp
+                        if (channels.isEmpty()) {
+                            // While channels are loading, display loading message
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(TvDarkSurface),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CircularProgressIndicator(
+                                        color = TvOrangeFocus,
+                                        modifier = Modifier.size(36.dp),
+                                        strokeWidth = 3.dp
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = "Loading live sports channels...",
+                                        color = TvTextSecondary,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        } else if (isFirstFramePassed && isHeroPlayerActive && currentPlayingChannel != null && !currentPlayingChannel.streamUrl.isNullOrBlank()) {
+                            TvStreamPlayer(
+                                channel = currentPlayingChannel,
+                                isSoundActive = true,
+                                isFullScreen = false,
+                                onNextChannel = onNextChannel,
+                                modifier = Modifier.fillMaxSize()
                             )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "Loading live sports channels...",
-                                color = TvTextSecondary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                        } else {
+                            // Safe Poster / Placeholder (waiting for 1500ms delay or if no stream)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(TvDarkSurface),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = Icons.Default.LiveTv,
+                                        contentDescription = null,
+                                        tint = TvOrangeFocus,
+                                        modifier = Modifier.size(48.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = currentPlayingChannel?.name ?: "Select a Game or Channel to Preview",
+                                        color = TvTextPrimary,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
                         }
                     }
-                } else if (isFirstFramePassed && isHeroPlayerActive && currentPlayingChannel != null && !currentPlayingChannel.streamUrl.isNullOrBlank()) {
-                    TvStreamPlayer(
-                        channel = currentPlayingChannel,
-                        isSoundActive = true,
-                        isFullScreen = false,
-                        onNextChannel = onNextChannel,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    // Safe Poster / Placeholder (waiting for 1500ms delay or if no stream)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(TvDarkSurface),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.LiveTv,
-                                contentDescription = null,
-                                tint = TvOrangeFocus,
-                                modifier = Modifier.size(54.dp)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = currentPlayingChannel?.name ?: "Select a Game or Channel to Preview",
-                                color = TvTextPrimary,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-
-                }
                 } // end hero Box
 
-                // Controls & Info bar BELOW the preview so D-pad Down reaches the buttons
+                // Controls & Info bar: compact layout fitting cleanly inside 205dp without any clipping
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(14.dp))
                         .background(Color.Black.copy(alpha = 0.35f))
-                        .padding(16.dp),
+                        .padding(12.dp),
                     verticalArrangement = Arrangement.Center
                 ) {
                     Column {
                         Text(
                             text = currentPlayingChannel?.name ?: if (channels.isEmpty()) "Loading channels..." else "No Channel Loaded",
                             color = Color.White,
-                            fontSize = 17.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -250,28 +252,33 @@ fun HomeScreen(
                         Text(
                             text = currentPlayingChannel?.groupTitle ?: "Sports Hub",
                             color = TvOrangeFocus,
-                            fontSize = 12.sp
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Column {
-                        if (currentPlayingChannel != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    if (currentPlayingChannel != null) {
+                        TvFocusButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            text = "Watch Full Screen",
+                            icon = Icons.Default.Fullscreen,
+                            isPrimary = true,
+                            onClick = { onWatchFullScreenChannel(currentPlayingChannel) }
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             TvFocusButton(
-                                modifier = Modifier.fillMaxWidth(0.8f),
-                                text = "Watch Full Screen",
-                                icon = Icons.Default.Fullscreen,
-                                onClick = { onWatchFullScreenChannel(currentPlayingChannel) }
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            TvFocusButton(
-                                modifier = Modifier.fillMaxWidth(0.8f),
+                                modifier = Modifier.weight(1f),
                                 text = "Back",
                                 icon = Icons.Default.SkipPrevious,
                                 onClick = onPreviousChannel
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
                             TvFocusButton(
-                                modifier = Modifier.fillMaxWidth(0.8f),
+                                modifier = Modifier.weight(1f),
                                 text = "Next Channel",
                                 icon = Icons.Default.SkipNext,
                                 onClick = onNextChannel
@@ -280,7 +287,7 @@ fun HomeScreen(
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
         }
 
         // 3. HOT THIS WEEK Trending Row (Top 10 Live & Marquee Matchups)
@@ -329,7 +336,7 @@ fun HomeScreen(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
 
@@ -353,7 +360,7 @@ fun HomeScreen(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
 
@@ -403,7 +410,7 @@ fun HomeScreen(
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
         // 5. NCAA Top Matchups List
