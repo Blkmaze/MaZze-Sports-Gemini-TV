@@ -59,19 +59,19 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     private val _revealedGameIds = MutableStateFlow<Set<String>>(emptySet())
     val revealedGameIds: StateFlow<Set<String>> = _revealedGameIds.asStateFlow()
 
-    private val _multiviewChannels = MutableStateFlow<List<Channel?>>(listOf(null, null, null, null))
+    private val _multiviewChannels = MutableStateFlow<List<Channel?>>(listOf(null, null))
     val multiviewChannels: StateFlow<List<Channel?>> = _multiviewChannels.asStateFlow()
 
-    private val _multiviewGameTitles = MutableStateFlow<List<String?>>(listOf(null, null, null, null))
+    private val _multiviewGameTitles = MutableStateFlow<List<String?>>(listOf(null, null))
     val multiviewGameTitles: StateFlow<List<String?>> = _multiviewGameTitles.asStateFlow()
 
     private val _multiviewCandidates = MutableStateFlow<List<List<Channel>>>(
-        listOf(emptyList(), emptyList(), emptyList(), emptyList())
+        listOf(emptyList(), emptyList())
     )
     val multiviewCandidates: StateFlow<List<List<Channel>>> = _multiviewCandidates.asStateFlow()
 
     private val manualTileIndices = mutableSetOf<Int>()
-    private val tileEvictionQueue = mutableListOf(0, 1, 2, 3)
+    private val tileEvictionQueue = mutableListOf(0, 1)
 
     private val _multiviewSoundIndex = MutableStateFlow(0)
     val multiviewSoundIndex: StateFlow<Int> = _multiviewSoundIndex.asStateFlow()
@@ -223,22 +223,27 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setMultiviewSound(tileIndex: Int) {
-        if (tileIndex in 0..3) {
+        if (tileIndex in 0..1) {
             _multiviewSoundIndex.value = tileIndex
         }
     }
 
     fun setMultiviewSlotChannel(slotIndex: Int, channel: Channel) {
-        if (slotIndex in 0..3) {
+        if (slotIndex in 0..1) {
             val list = _multiviewChannels.value.toMutableList()
-            while (list.size < 4) list.add(null)
+            while (list.size < 2) list.add(null)
             list[slotIndex] = channel
-            _multiviewChannels.value = list
+            _multiviewChannels.value = list.take(2)
 
             val titles = _multiviewGameTitles.value.toMutableList()
-            while (titles.size < 4) titles.add(null)
+            while (titles.size < 2) titles.add(null)
             titles[slotIndex] = channel.name
-            _multiviewGameTitles.value = titles
+            _multiviewGameTitles.value = titles.take(2)
+
+            val candList = _multiviewCandidates.value.toMutableList()
+            while (candList.size < 2) candList.add(emptyList())
+            candList[slotIndex] = listOf(channel)
+            _multiviewCandidates.value = candList.take(2)
 
             manualTileIndices.add(slotIndex)
             tileEvictionQueue.remove(slotIndex)
@@ -247,24 +252,31 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun addGameToMultiview(gameTitle: String, candidateChannels: List<Channel>): Int {
-        val targetSlot = tileEvictionQueue.firstOrNull { it !in manualTileIndices }
-            ?: tileEvictionQueue.firstOrNull()
-            ?: 0
+        val currentChannels = _multiviewChannels.value
+        val emptySlot = (0..1).firstOrNull { currentChannels.getOrNull(it) == null }
 
-        val list = _multiviewChannels.value.toMutableList()
-        while (list.size < 4) list.add(null)
+        val targetSlot = if (emptySlot != null) {
+            emptySlot
+        } else {
+            // Both slots are full: replace the older stream
+            val older = tileEvictionQueue.firstOrNull { it in 0..1 } ?: 0
+            older
+        }
+
+        val list = currentChannels.toMutableList()
+        while (list.size < 2) list.add(null)
         list[targetSlot] = candidateChannels.firstOrNull()
-        _multiviewChannels.value = list
+        _multiviewChannels.value = list.take(2)
 
         val titles = _multiviewGameTitles.value.toMutableList()
-        while (titles.size < 4) titles.add(null)
+        while (titles.size < 2) titles.add(null)
         titles[targetSlot] = gameTitle
-        _multiviewGameTitles.value = titles
+        _multiviewGameTitles.value = titles.take(2)
 
         val candList = _multiviewCandidates.value.toMutableList()
-        while (candList.size < 4) candList.add(emptyList())
+        while (candList.size < 2) candList.add(emptyList())
         candList[targetSlot] = candidateChannels
-        _multiviewCandidates.value = candList
+        _multiviewCandidates.value = candList.take(2)
 
         manualTileIndices.add(targetSlot)
         tileEvictionQueue.remove(targetSlot)
@@ -275,7 +287,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun cycleMultiviewTileToNextCandidate(tileIndex: Int) {
-        if (tileIndex !in 0..3) return
+        if (tileIndex !in 0..1) return
         val candidates = _multiviewCandidates.value.getOrNull(tileIndex) ?: return
         if (candidates.size <= 1) return
 
@@ -286,7 +298,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         val nextChannel = candidates.getOrNull(nextIndex) ?: return
         val list = _multiviewChannels.value.toMutableList()
         list[tileIndex] = nextChannel
-        _multiviewChannels.value = list
+        _multiviewChannels.value = list.take(2)
     }
 
     fun autoFillMultiviewTop20(forceAll: Boolean = false) {
@@ -296,47 +308,47 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
 
             val topGames = _ncaaFootballData.value.games
             val currentMultiview = _multiviewChannels.value.toMutableList()
-            while (currentMultiview.size < 4) currentMultiview.add(null)
+            while (currentMultiview.size < 2) currentMultiview.add(null)
 
             val currentTitles = _multiviewGameTitles.value.toMutableList()
-            while (currentTitles.size < 4) currentTitles.add(null)
+            while (currentTitles.size < 2) currentTitles.add(null)
 
             val currentCandidates = _multiviewCandidates.value.toMutableList()
-            while (currentCandidates.size < 4) currentCandidates.add(emptyList())
+            while (currentCandidates.size < 2) currentCandidates.add(emptyList())
 
             val usedChannelIds = mutableSetOf<String>()
 
             withContext(Dispatchers.Default) {
-            for (i in 0 until 4) {
-                if (forceAll || currentMultiview.getOrNull(i) == null) {
-                    val candidateGame = topGames.getOrNull(i)
-                    if (candidateGame != null) {
-                        val candidates = ChannelMatchingHelper.findCandidatesForNcaaGame(
-                            candidateGame, allChannels, usedChannelIds
-                        )
-                        val topMatch = candidates.firstOrNull()
-                        if (topMatch != null) {
-                            usedChannelIds.add(topMatch.id)
-                            currentMultiview[i] = topMatch
-                            currentTitles[i] = "${candidateGame.awayTeam.displayName} @ ${candidateGame.homeTeam.displayName}"
-                            currentCandidates[i] = candidates
-                        }
-                    } else {
-                        val fallback = allChannels.firstOrNull { it.id !in usedChannelIds }
-                        if (fallback != null) {
-                            usedChannelIds.add(fallback.id)
-                            currentMultiview[i] = fallback
-                            currentTitles[i] = fallback.name
-                            currentCandidates[i] = listOf(fallback)
+                for (i in 0 until 2) {
+                    if (forceAll || currentMultiview.getOrNull(i) == null) {
+                        val candidateGame = topGames.getOrNull(i)
+                        if (candidateGame != null) {
+                            val candidates = ChannelMatchingHelper.findCandidatesForNcaaGame(
+                                candidateGame, allChannels, usedChannelIds
+                            )
+                            val topMatch = candidates.firstOrNull()
+                            if (topMatch != null) {
+                                usedChannelIds.add(topMatch.id)
+                                currentMultiview[i] = topMatch
+                                currentTitles[i] = "${candidateGame.awayTeam.displayName} @ ${candidateGame.homeTeam.displayName}"
+                                currentCandidates[i] = candidates
+                            }
+                        } else {
+                            val fallback = allChannels.firstOrNull { it.id !in usedChannelIds }
+                            if (fallback != null) {
+                                usedChannelIds.add(fallback.id)
+                                currentMultiview[i] = fallback
+                                currentTitles[i] = fallback.name
+                                currentCandidates[i] = listOf(fallback)
+                            }
                         }
                     }
                 }
             }
-            }
 
-            _multiviewChannels.value = currentMultiview
-            _multiviewGameTitles.value = currentTitles
-            _multiviewCandidates.value = currentCandidates
+            _multiviewChannels.value = currentMultiview.take(2)
+            _multiviewGameTitles.value = currentTitles.take(2)
+            _multiviewCandidates.value = currentCandidates.take(2)
         }
     }
 

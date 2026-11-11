@@ -2,7 +2,11 @@ package com.example.player
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.view.KeyEvent
+import android.view.Surface
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.annotation.OptIn
@@ -23,6 +27,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.platform.LocalContext
@@ -34,8 +40,11 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -43,6 +52,26 @@ import androidx.media3.ui.PlayerView
 import com.example.model.Channel
 import com.example.ui.components.TvFocusButton
 import com.example.ui.theme.*
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+private fun extractHttpCode(throwable: Throwable?): Int? {
+    var current: Throwable? = throwable
+    while (current != null) {
+        if (current is HttpDataSource.InvalidResponseCodeException) {
+            return current.responseCode
+        }
+        val msg = current.message ?: ""
+        val match = Regex("""response code:\s*(\d+)""", RegexOption.IGNORE_CASE).find(msg)
+            ?: Regex("""HTTP\s*(\d{3})""", RegexOption.IGNORE_CASE).find(msg)
+        if (match != null) {
+            match.groupValues[1].toIntOrNull()?.let { return it }
+        }
+        current = current.cause
+    }
+    return null
+}
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -59,11 +88,17 @@ fun TvStreamPlayer(
     val context = LocalContext.current
     var hasError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    var errorDetail by remember { mutableStateOf("") }
     var showOsd by remember { mutableStateOf(false) }
     var retryCount by remember { mutableIntStateOf(0) }
+    var autoRetryCount by remember { mutableIntStateOf(0) }
+    val coroutineScope = rememberCoroutineScope()
+    var retryJob by remember { mutableStateOf<Job?>(null) }
+    val retryFocusRequester = remember { FocusRequester() }
 
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var isReleased by remember { mutableStateOf(false) }
+    var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
 
     val exoPlayer = remember(context) {
         try {
@@ -78,8 +113,19 @@ fun TvStreamPlayer(
 
             val mediaSourceFactory = DefaultMediaSourceFactory(httpDataSourceFactory)
 
+            // Live sports buffering tuned for quick starts and resilience against short network hiccups
+            val loadControl = DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    15000, // minBufferMs (~15s)
+                    50000, // maxBufferMs (~50s)
+                    2500,  // bufferForPlaybackMs (~2.5s)
+                    5000   // bufferForPlaybackAfterRebufferMs (~5s)
+                )
+                .build()
+
             ExoPlayer.Builder(context, renderersFactory)
                 .setMediaSourceFactory(mediaSourceFactory)
+                .setLoadControl(loadControl)
                 .setWakeMode(C.WAKE_MODE_NETWORK)
                 .build().apply {
                     repeatMode = Player.REPEAT_MODE_OFF
@@ -90,26 +136,117 @@ fun TvStreamPlayer(
         }
     }
 
+    // Auto-focus the Retry button whenever the error overlay appears
+    LaunchedEffect(hasError) {
+        if (hasError) {
+            delay(100)
+            try {
+                retryFocusRequester.requestFocus()
+            } catch (e: Exception) {
+                delay(150)
+                try {
+                    retryFocusRequester.requestFocus()
+                } catch (e2: Exception) {
+                    // Ignore if node not yet active
+                }
+            }
+        }
+    }
+
+    // Smooth motion frame-rate matching helper for Android 11+ (API 30+)
+    val applySmoothMotion: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val fps = exoPlayer?.videoFormat?.frameRate ?: -1f
+                if (fps > 0f) {
+                    val surface = (playerViewRef?.videoSurfaceView as? SurfaceView)?.holder?.surface
+                    if (surface != null && surface.isValid) {
+                        surface.setFrameRate(
+                            fps,
+                            Surface.FRAME_RATE_COMPATIBILITY_DEFAULT,
+                            Surface.CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
+    }
+
     DisposableEffect(exoPlayer, lifecycleOwner) {
         if (exoPlayer != null && !isReleased) {
             val listener = object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
-                    hasError = true
-                    val cause = error.cause?.localizedMessage ?: error.localizedMessage ?: ""
-                    errorMessage = when {
-                        cause.contains("404", ignoreCase = true) || error.errorCodeName.contains("IO", ignoreCase = true) ->
-                            "Stream feed unavailable (HTTP 404)"
-                        cause.contains("timeout", ignoreCase = true) ->
-                            "Connection timed out"
-                        else ->
-                            "Stream error (${error.errorCodeName})"
+                    // Auto-reconnect up to 3 times with backoff (~1s, 3s, 6s) before showing error overlay
+                    if (autoRetryCount < 3) {
+                        autoRetryCount++
+                        val delayMs = when (autoRetryCount) {
+                            1 -> 1000L
+                            2 -> 3000L
+                            else -> 6000L
+                        }
+                        retryJob?.cancel()
+                        retryJob = coroutineScope.launch {
+                            delay(delayMs)
+                            if (!isReleased && exoPlayer != null) {
+                                try {
+                                    val streamUrl = channel?.streamUrl
+                                    if (!streamUrl.isNullOrEmpty()) {
+                                        val uri = Uri.parse(streamUrl)
+                                        val mediaItem = MediaItem.Builder()
+                                            .setUri(uri)
+                                            .build()
+                                        exoPlayer.setMediaItem(mediaItem)
+                                    }
+                                    exoPlayer.prepare()
+                                    exoPlayer.play()
+                                } catch (e: Exception) {
+                                    // Ignore
+                                }
+                            }
+                        }
+                    } else {
+                        hasError = true
+                        val httpCode = extractHttpCode(error)
+                        val cause = error.cause?.localizedMessage ?: error.localizedMessage ?: ""
+                        errorMessage = when {
+                            httpCode == 404 || cause.contains("404", ignoreCase = true) || error.errorCodeName.contains("IO", ignoreCase = true) ->
+                                "Stream feed unavailable (HTTP 404)"
+                            cause.contains("timeout", ignoreCase = true) ->
+                                "Connection timed out"
+                            else ->
+                                "Stream error (${error.errorCodeName})"
+                        }
+
+                        val codeName = error.errorCodeName
+                        val causeName = error.cause?.javaClass?.simpleName
+                        val causeInfo = if (!causeName.isNullOrEmpty() && causeName != "PlaybackException") " • $causeName" else ""
+                        errorDetail = if (httpCode != null) {
+                            "$codeName • HTTP $httpCode"
+                        } else {
+                            "$codeName$causeInfo"
+                        }
                     }
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY) {
                         hasError = false
+                        errorMessage = ""
+                        errorDetail = ""
+                        autoRetryCount = 0
+                        retryJob?.cancel()
+                        applySmoothMotion()
                     }
+                }
+
+                override fun onTracksChanged(tracks: Tracks) {
+                    applySmoothMotion()
+                }
+
+                override fun onRenderedFirstFrame() {
+                    applySmoothMotion()
                 }
             }
             try {
@@ -122,6 +259,7 @@ fun TvStreamPlayer(
                 if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
                     try {
                         isReleased = true
+                        retryJob?.cancel()
                         exoPlayer.stop()
                         exoPlayer.release()
                     } catch (e: Exception) {
@@ -133,6 +271,7 @@ fun TvStreamPlayer(
 
             onDispose {
                 lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
+                retryJob?.cancel()
                 try {
                     isReleased = true
                     exoPlayer.removeListener(listener)
@@ -161,9 +300,13 @@ fun TvStreamPlayer(
     // Update Media Item when channel or retryCount changes
     LaunchedEffect(channel?.streamUrl, retryCount, isReleased) {
         if (isReleased || exoPlayer == null) return@LaunchedEffect
+        autoRetryCount = 0
+        retryJob?.cancel()
         val streamUrl = channel?.streamUrl
         if (!streamUrl.isNullOrEmpty()) {
             hasError = false
+            errorMessage = ""
+            errorDetail = ""
             try {
                 val uri = Uri.parse(streamUrl)
                 val mediaItem = MediaItem.Builder()
@@ -175,6 +318,7 @@ fun TvStreamPlayer(
             } catch (e: Exception) {
                 hasError = true
                 errorMessage = e.localizedMessage ?: "Failed to open stream"
+                errorDetail = e.javaClass.simpleName
             }
         } else {
             try {
@@ -197,21 +341,23 @@ fun TvStreamPlayer(
                 if (keyEvent.type == KeyEventType.KeyDown) {
                     when (keyEvent.nativeKeyEvent.keyCode) {
                         KeyEvent.KEYCODE_DPAD_UP -> {
-                            if (isFullScreen) {
+                            if (!hasError && isFullScreen) {
                                 onNextChannel()
                                 showOsd = true
                                 true
                             } else false
                         }
                         KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            if (isFullScreen) {
+                            if (!hasError && isFullScreen) {
                                 onPreviousChannel()
                                 showOsd = true
                                 true
                             } else false
                         }
                         KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                            if (isFullScreen) {
+                            if (hasError) {
+                                false // Allow focused button (Retry Stream / Next Channel / Back) to receive Enter
+                            } else if (isFullScreen) {
                                 showOsd = !showOsd
                                 true
                             } else {
@@ -234,6 +380,7 @@ fun TvStreamPlayer(
             AndroidView(
                 factory = { ctx ->
                     PlayerView(ctx).apply {
+                        playerViewRef = this
                         try {
                             if (!isReleased) player = exoPlayer
                         } catch (e: Exception) {
@@ -245,15 +392,37 @@ fun TvStreamPlayer(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            (videoSurfaceView as? SurfaceView)?.holder?.addCallback(object : SurfaceHolder.Callback {
+                                override fun surfaceCreated(holder: SurfaceHolder) {
+                                    applySmoothMotion()
+                                }
+                                override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                                    applySmoothMotion()
+                                }
+                                override fun surfaceDestroyed(holder: SurfaceHolder) {}
+                            })
+                        }
                     }
                 },
                 update = { view ->
+                    playerViewRef = view
                     try {
                         if (!isReleased && view.player != exoPlayer) {
                             view.player = exoPlayer
                         }
                     } catch (e: Exception) {
                         // Ignore
+                    }
+                },
+                onRelease = { view ->
+                    try {
+                        view.player = null
+                    } catch (e: Exception) {
+                        // Ignore
+                    }
+                    if (playerViewRef == view) {
+                        playerViewRef = null
                     }
                 },
                 modifier = Modifier.fillMaxSize()
@@ -312,14 +481,30 @@ fun TvStreamPlayer(
                         text = errorMessage,
                         color = TvTextSecondary,
                         fontSize = 11.sp,
-                        modifier = Modifier.padding(vertical = 4.dp)
+                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                     )
+                    if (errorDetail.isNotBlank()) {
+                        Text(
+                            text = errorDetail,
+                            color = TvTextMuted,
+                            fontSize = 10.sp,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    }
                     Spacer(modifier = Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         TvFocusButton(
                             text = "Retry Stream",
                             icon = Icons.Default.Refresh,
-                            onClick = { retryCount++ }
+                            modifier = Modifier.focusRequester(retryFocusRequester),
+                            onClick = {
+                                hasError = false
+                                errorMessage = ""
+                                errorDetail = ""
+                                autoRetryCount = 0
+                                retryJob?.cancel()
+                                retryCount++
+                            }
                         )
                         TvFocusButton(
                             text = "Next Channel",
@@ -327,9 +512,27 @@ fun TvStreamPlayer(
                             isPrimary = true,
                             onClick = {
                                 hasError = false
+                                errorMessage = ""
+                                errorDetail = ""
+                                autoRetryCount = 0
+                                retryJob?.cancel()
                                 onNextChannel()
                             }
                         )
+                        if (isFullScreen) {
+                            TvFocusButton(
+                                text = "Back",
+                                icon = Icons.Default.FullscreenExit,
+                                onClick = {
+                                    hasError = false
+                                    errorMessage = ""
+                                    errorDetail = ""
+                                    autoRetryCount = 0
+                                    retryJob?.cancel()
+                                    onBack()
+                                }
+                            )
+                        }
                     }
                 }
             }

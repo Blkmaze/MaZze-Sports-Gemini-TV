@@ -43,7 +43,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
 import com.example.model.Channel
 import com.example.ui.components.TvFocusButton
@@ -64,14 +63,6 @@ fun MultiviewScreen(
 ) {
     var activeMenuTile by remember { mutableStateOf<Int?>(null) }
     var channelPickerSlot by remember { mutableStateOf<Int?>(null) }
-    var secondaryPlayingTile by remember { mutableIntStateOf((activeSoundIndex + 1) % 4) }
-
-    // Ensure secondary tile is always distinct from sound active tile
-    LaunchedEffect(activeSoundIndex) {
-        if (secondaryPlayingTile == activeSoundIndex) {
-            secondaryPlayingTile = (activeSoundIndex + 1) % 4
-        }
-    }
 
     Column(
         modifier = modifier
@@ -87,14 +78,14 @@ fun MultiviewScreen(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Quad Multiview",
+                    text = "Dual Multiview",
                     color = Color.White,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Black
                 )
                 Spacer(modifier = Modifier.width(16.dp))
                 Text(
-                    text = "Audio: Tile ${activeSoundIndex + 1} • Max 2 Decoders Active",
+                    text = "Audio: Screen ${activeSoundIndex + 1} • Focus switches sound",
                     color = TvLimeAccent,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
@@ -111,78 +102,37 @@ fun MultiviewScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 2x2 Multiview Grid
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+        // Side-by-Side 2-Screen Multiview Layout
+        Row(
+            modifier = Modifier
+                .fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Row 1 (Tiles 0 & 1)
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                for (idx in 0..1) {
-                    val isSound = idx == activeSoundIndex
-                    // Only active sound tile and at most 1 secondary tile decode video
-                    val shouldPlayVideo = (idx == activeSoundIndex || idx == secondaryPlayingTile)
+            for (idx in 0..1) {
+                val isSound = (idx == activeSoundIndex)
 
-                    MultiviewTile(
-                        tileIndex = idx,
-                        channel = multiviewChannels.getOrNull(idx),
-                        gameTitle = multiviewGameTitles.getOrNull(idx),
-                        isSoundActive = isSound,
-                        shouldPlayVideo = shouldPlayVideo,
-                        onClick = {
-                            if (activeSoundIndex != idx) {
-                                onSetSoundIndex(idx)
-                            }
-                            secondaryPlayingTile = idx
-                        },
-                        onOpenMenu = { activeMenuTile = idx },
-                        onStartPlayback = {
-                            secondaryPlayingTile = idx
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                    )
-                }
-            }
-
-            // Row 2 (Tiles 2 & 3)
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                for (idx in 2..3) {
-                    val isSound = idx == activeSoundIndex
-                    val shouldPlayVideo = (idx == activeSoundIndex || idx == secondaryPlayingTile)
-
-                    MultiviewTile(
-                        tileIndex = idx,
-                        channel = multiviewChannels.getOrNull(idx),
-                        gameTitle = multiviewGameTitles.getOrNull(idx),
-                        isSoundActive = isSound,
-                        shouldPlayVideo = shouldPlayVideo,
-                        onClick = {
-                            if (activeSoundIndex != idx) {
-                                onSetSoundIndex(idx)
-                            }
-                            secondaryPlayingTile = idx
-                        },
-                        onOpenMenu = { activeMenuTile = idx },
-                        onStartPlayback = {
-                            secondaryPlayingTile = idx
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                    )
-                }
+                MultiviewTile(
+                    tileIndex = idx,
+                    channel = multiviewChannels.getOrNull(idx),
+                    gameTitle = multiviewGameTitles.getOrNull(idx),
+                    isSoundActive = isSound,
+                    shouldPlayVideo = true,
+                    onClick = {
+                        if (activeSoundIndex != idx) {
+                            onSetSoundIndex(idx)
+                        }
+                        activeMenuTile = idx
+                    },
+                    onFocusGained = {
+                        if (activeSoundIndex != idx) {
+                            onSetSoundIndex(idx)
+                        }
+                    },
+                    onOpenMenu = { activeMenuTile = idx },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                )
             }
         }
     }
@@ -200,13 +150,13 @@ fun MultiviewScreen(
             ) {
                 Column {
                     Text(
-                        text = "Tile ${slot + 1} Options",
+                        text = "Screen ${slot + 1} Options",
                         color = Color.White,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = currentChannel?.name ?: "Empty Tile",
+                        text = currentChannel?.name ?: "Empty Slot",
                         color = TvOrangeFocus,
                         fontSize = 13.sp
                     )
@@ -227,11 +177,10 @@ fun MultiviewScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     TvFocusButton(
-                        text = "Set Sound Active",
+                        text = "Turn Audio On",
                         icon = Icons.Default.VolumeUp,
                         onClick = {
                             onSetSoundIndex(slot)
-                            secondaryPlayingTile = slot
                             activeMenuTile = null
                         },
                         modifier = Modifier.fillMaxWidth()
@@ -296,8 +245,8 @@ fun MultiviewTile(
     isSoundActive: Boolean,
     shouldPlayVideo: Boolean,
     onClick: () -> Unit,
+    onFocusGained: () -> Unit,
     onOpenMenu: () -> Unit,
-    onStartPlayback: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -306,38 +255,34 @@ fun MultiviewTile(
     var isPlayerError by remember { mutableStateOf(false) }
     var errorDetail by remember { mutableStateOf("") }
 
-    // Quality capped ExoPlayer: only instantiated if channel present AND decoder slot allowed
+    // When focus lands on this screen via D-pad navigation, switch sound to this screen
+    LaunchedEffect(isFocused) {
+        if (isFocused) {
+            onFocusGained()
+        }
+    }
+
     val exoPlayer = remember(context, channel?.streamUrl, shouldPlayVideo) {
         if (!shouldPlayVideo || channel == null || channel.streamUrl.isBlank()) {
             null
         } else {
             try {
-                val trackSelector = DefaultTrackSelector(context).apply {
-                    // Cap non-sound tiles to 360p / 1.2Mbps to prevent hardware decoder starvation
-                    if (!isSoundActive) {
-                        setParameters(
-                            buildUponParameters()
-                                .setMaxVideoSize(640, 360)
-                                .setMaxVideoBitrate(1200000)
-                        )
-                    }
+                val renderersFactory = DefaultRenderersFactory(context).apply {
+                    setEnableDecoderFallback(true)
                 }
 
                 val loadControl = DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(2000, 5000, 1000, 1000)
+                    .setBufferDurationsMs(4000, 15000, 1500, 2500)
                     .setBackBuffer(0, false)
                     .build()
 
-                val renderersFactory = DefaultRenderersFactory(context)
-                    .setEnableDecoderFallback(true)
-
                 ExoPlayer.Builder(context, renderersFactory)
-                    .setTrackSelector(trackSelector)
                     .setLoadControl(loadControl)
                     .build().apply {
                         val mediaItem = MediaItem.fromUri(channel.streamUrl)
                         setMediaItem(mediaItem)
                         volume = if (isSoundActive) 1.0f else 0.0f
+                        repeatMode = Player.REPEAT_MODE_OFF
                         prepare()
                         playWhenReady = true
                     }
@@ -378,15 +323,20 @@ fun MultiviewTile(
         } catch (e: Throwable) {}
     }
 
+    val borderColor = when {
+        isFocused -> TvOrangeFocus
+        isSoundActive -> TvLimeAccent
+        else -> Color(0x33FFFFFF)
+    }
+
+    val borderWidth = if (isFocused) 4.dp else if (isSoundActive) 2.dp else 1.dp
+
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(TvDarkCard)
             .border(
-                BorderStroke(
-                    width = if (isFocused) 3.dp else if (isSoundActive) 2.dp else 1.dp,
-                    color = if (isFocused) Color.White else if (isSoundActive) TvOrangeFocus else Color.Transparent
-                ),
+                BorderStroke(width = borderWidth, color = borderColor),
                 RoundedCornerShape(12.dp)
             )
             .focusable(interactionSource = interactionSource)
@@ -418,7 +368,7 @@ fun MultiviewTile(
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                // Defensive Still Poster view when hardware decoders are reserved
+                // Defensive poster view
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -443,21 +393,6 @@ fun MultiviewTile(
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(TvOrangeFocus)
-                                .clickable { onStartPlayback() }
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "Press OK to play",
-                                color = Color.Black,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
                     }
                 }
             }
@@ -474,93 +409,108 @@ fun MultiviewTile(
                         imageVector = Icons.Default.AddCircleOutline,
                         contentDescription = null,
                         tint = TvTextSecondary,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(48.dp)
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Tile ${tileIndex + 1} (Empty)",
+                        text = "Screen ${tileIndex + 1} (Empty)",
                         color = TvTextSecondary,
-                        fontSize = 13.sp
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
                     )
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Click to assign channel",
+                        text = "Click / Press OK to assign channel",
                         color = TvTextMuted,
-                        fontSize = 11.sp
+                        fontSize = 12.sp
                     )
                 }
             }
         }
 
-        // Top Tile Status Badges
+        // Top Status Badges (Screen number & Audio status)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp)
+                .padding(10.dp)
                 .align(Alignment.TopCenter),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.Black.copy(alpha = 0.75f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = "Tile ${tileIndex + 1}",
-                    color = Color.White,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (isFocused) TvOrangeFocus else Color.Black.copy(alpha = 0.75f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "Screen ${tileIndex + 1}",
+                        color = if (isFocused) Color.Black else Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
 
-            Row {
                 if (isSoundActive) {
+                    Spacer(modifier = Modifier.width(6.dp))
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
-                            .background(TvOrangeFocus)
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .background(TvLimeAccent)
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Text(
                             text = "AUDIO ON",
                             color = Color.Black,
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Black
                         )
                     }
                 }
-                Spacer(modifier = Modifier.width(6.dp))
-                IconButton(
-                    onClick = onOpenMenu,
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = "Options",
-                        tint = Color.White
-                    )
-                }
+            }
+
+            IconButton(
+                onClick = onOpenMenu,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "Options",
+                    tint = Color.White
+                )
             }
         }
 
-        // Bottom Channel Name
+        // Bottom Channel Name bar
         if (channel != null) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
-                    .background(Color.Black.copy(alpha = 0.7f))
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .background(Color.Black.copy(alpha = 0.75f))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                Text(
-                    text = gameTitle ?: channel.name,
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = gameTitle ?: channel.name,
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "Press OK for options",
+                        color = TvTextSecondary,
+                        fontSize = 11.sp
+                    )
+                }
             }
         }
     }
@@ -590,7 +540,7 @@ fun MultiviewChannelPickerDialog(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Text(
-                    text = "Assign Channel to Tile ${slot + 1}",
+                    text = "Assign Channel to Screen ${slot + 1}",
                     color = Color.White,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
