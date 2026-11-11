@@ -101,7 +101,7 @@ fun HomeScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = if (appVersionLabel.isNotBlank()) "MaZze Sports TV  ($appVersionLabel)" else "MaZze Sports TV",
+                        text = if (appVersionLabel.isNotBlank()) "MaZzE Sports TV  ($appVersionLabel)" else "MaZzE Sports TV",
                         color = Color.White,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Black
