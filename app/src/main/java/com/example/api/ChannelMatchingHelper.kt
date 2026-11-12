@@ -30,7 +30,11 @@ object ChannelMatchingHelper {
         "nbc sports" to listOf("nbc sports", "nbcsn"),
         "golf" to listOf("golf channel", "golf"),
         "mlb network" to listOf("mlb network", "mlb"),
-        "nhl network" to listOf("nhl network", "nhl")
+        "nhl network" to listOf("nhl network", "nhl"),
+        "espn w" to listOf("espn w", "espnw", "espn"),
+        "espnw" to listOf("espn w", "espnw", "espn"),
+        "acc" to listOf("acc network", "accn", "acc"),
+        "btn" to listOf("btn", "big ten network", "big ten", "b1g")
     )
 
     private val commonGenericWords = setOf(
@@ -105,6 +109,18 @@ object ChannelMatchingHelper {
             // League bonus
             if (league.isNotBlank() && (containsToken(cName, league) || containsToken(cGroup, league))) {
                 score += 20
+            }
+
+            // NCAAW / Women's basketball match bonus
+            if (league.contains("ncaaw") || league.contains("women") || league.contains("wbb")) {
+                val isWbb = containsToken(cName, "ncaaw") || containsToken(cName, "wbb") ||
+                        containsToken(cName, "women's basketball") || containsToken(cName, "women's college basketball") ||
+                        containsToken(cName, "espn w") || containsToken(cName, "espnw") ||
+                        containsToken(cGroup, "ncaaw") || containsToken(cGroup, "wbb") ||
+                        containsToken(cGroup, "women's basketball") || containsToken(cGroup, "women's college basketball")
+                if (isWbb) {
+                    score += 60
+                }
             }
 
             if (channel.isSports) score += 5

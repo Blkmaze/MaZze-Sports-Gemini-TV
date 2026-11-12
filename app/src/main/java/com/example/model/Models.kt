@@ -42,7 +42,8 @@ data class ApTeamRank(
     val abbreviation: String = "",
     val logoUrl: String = "",
     val isSec: Boolean = false,
-    val teamId: String = ""
+    val teamId: String = "",
+    val record: String = ""
 )
 
 data class NcaaGame(
@@ -79,12 +80,37 @@ data class SquareCell(
     val isUserSquare: Boolean = false
 )
 
+data class SquarePendingEntry(
+    val id: String = "",
+    val initials: String = "",
+    val count: Int = 1,
+    val paymentMethod: String = "CASH",
+    val totalAmount: Int = 0,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+data class SquareSale(
+    val id: String = "",
+    val initials: String = "",
+    val count: Int = 1,
+    val paymentMethod: String = "CASH",
+    val assignedSquares: List<Int> = emptyList(),
+    val totalAmount: Int = 0,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 data class SquaresBoard(
     val gameId: String = "",
+    val boardVersion: Int = 1,
     val pricePerSquare: Int = 10,
+    val payoutType: String = "QUARTERS",
+    val isNumbersLocked: Boolean = false,
+    val isBoardLocked: Boolean = false,
     val homeNumbers: List<Int> = emptyList(),
     val awayNumbers: List<Int> = emptyList(),
-    val cells: List<SquareCell> = emptyList()
+    val cells: List<SquareCell> = emptyList(),
+    val pendingEntries: List<SquarePendingEntry> = emptyList(),
+    val sales: List<SquareSale> = emptyList()
 )
 
 data class PlaylistConfig(

@@ -1,0 +1,1465 @@
+package com.example.ui.screens
+
+import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import com.example.model.Game
+import com.example.model.SquaresBoard
+import com.example.ui.components.TvFocusButton
+import com.example.ui.components.TvFocusCard
+import com.example.ui.theme.*
+import com.example.util.SquaresAdminManager
+import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.*
+
+private sealed interface AdminDialogState {
+    data object None : AdminDialogState
+    data object SetInitialPin : AdminDialogState
+    data object EnterPinForReset : AdminDialogState
+    data object EnterPinForChange : AdminDialogState
+    data object SetNewPin : AdminDialogState
+    data object ConfirmReset : AdminDialogState
+}
+
+@Composable
+fun SquaresScreen(
+    games: List<Game>,
+    selectedGame: Game?,
+    squaresBoard: SquaresBoard,
+    showPaymentDialog: Boolean,
+    paymentMethod: String,
+    onSelectGame: (Game) -> Unit = {},
+    onSetPrice: (Int) -> Unit = {},
+    onSelectPrice: (Int) -> Unit = onSetPrice,
+    onToggleSquare: (Int, Int) -> Unit = { _, _ -> },
+    onOpenPaymentQr: (String) -> Unit = {},
+    onOpenPayment: (String) -> Unit = onOpenPaymentQr,
+    onClosePaymentQr: () -> Unit = {},
+    onClosePayment: () -> Unit = onClosePaymentQr,
+    onOpenLink: (String) -> Unit = {},
+    onOpenBrowser: (String) -> Unit = onOpenLink,
+    onSellSquares: (String, Int, String) -> List<Int> = { _, _, _ -> emptyList() },
+    onResetBoard: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val adminManager = remember { SquaresAdminManager(context) }
+    val prices = listOf(5, 10, 20, 50)
+
+    // Buyer Entry State
+    var buyerInitials by remember { mutableStateOf("") }
+    var squareCount by remember { mutableIntStateOf(1) }
+    var showSellPaymentModal by remember { mutableStateOf(false) }
+    var selectedSellMethod by remember { mutableStateOf("CASH") } // CASH, CASH APP, PAYPAL, ZELLE
+
+    // Confirmation of assigned squares
+    var assignedConfirmation by remember { mutableStateOf<Pair<String, List<Int>>?>(null) }
+
+    // Admin PIN Flow State
+    var adminDialog by remember { mutableStateOf<AdminDialogState>(AdminDialogState.None) }
+    var pinFirstEntry by remember { mutableStateOf("") }
+    var pinSecondEntry by remember { mutableStateOf("") }
+    var pinCurrentEntry by remember { mutableStateOf("") }
+    var pinErrorText by remember { mutableStateOf<String?>(null) }
+    var lockoutRemaining by remember { mutableIntStateOf(0) }
+
+    // Focused cell inspector
+    var focusedCellIndex by remember { mutableStateOf<Int?>(null) }
+
+    // Lockout timer ticker
+    LaunchedEffect(adminDialog) {
+        while (true) {
+            val remaining = adminManager.getRemainingLockoutSeconds()
+            lockoutRemaining = remaining
+            delay(1000L)
+        }
+    }
+
+    val openSquares = remember(squaresBoard.cells) {
+        squaresBoard.cells.filter { it.ownerName.isBlank() }
+    }
+    val openCount = openSquares.size
+    val totalSold = 100 - openCount
+    val totalPot = 100 * squaresBoard.pricePerSquare
+
+    // Payout percentages: 20% Q1, 20% Q2, 20% Q3, 40% Final
+    val q1Payout = (totalPot * 0.20).toInt()
+    val q2Payout = (totalPot * 0.20).toInt()
+    val q3Payout = (totalPot * 0.20).toInt()
+    val finalPayout = (totalPot * 0.40).toInt()
+
+    // Sales summary calculations
+    val totalRevenue = squaresBoard.sales.sumOf { it.totalAmount }
+    val cashSales = squaresBoard.sales.filter { it.paymentMethod.equals("CASH", ignoreCase = true) }
+    val cashAppSales = squaresBoard.sales.filter { it.paymentMethod.equals("CASH APP", ignoreCase = true) }
+    val paypalSales = squaresBoard.sales.filter { it.paymentMethod.equals("PAYPAL", ignoreCase = true) }
+    val zelleSales = squaresBoard.sales.filter { it.paymentMethod.equals("ZELLE", ignoreCase = true) }
+
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .background(TvDarkBackground)
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        contentPadding = PaddingValues(bottom = 64.dp)
+    ) {
+        // 1. Header with Matchup, Price, and Reset Button
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Sports Squares (10x10 Pool)",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    Text(
+                        text = "Organizer Board · Randomized Auto-Assignment on Payment",
+                        color = TvTextSecondary,
+                        fontSize = 13.sp
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Price/Sq: ",
+                        color = TvTextSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    prices.forEach { p ->
+                        val isSel = squaresBoard.pricePerSquare == p
+                        TvFocusButton(
+                            text = "$$p",
+                            isPrimary = isSel,
+                            onClick = { onSelectPrice(p) },
+                            modifier = Modifier.padding(horizontal = 3.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    TvFocusButton(
+                        text = "Reset Board",
+                        icon = Icons.Default.RestartAlt,
+                        onClick = {
+                            pinErrorText = null
+                            pinFirstEntry = ""
+                            pinSecondEntry = ""
+                            pinCurrentEntry = ""
+                            adminDialog = if (!adminManager.isPinSet()) {
+                                AdminDialogState.SetInitialPin
+                            } else {
+                                AdminDialogState.EnterPinForReset
+                            }
+                        }
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+
+        // 2. Matchup Selector Row
+        item {
+            Text(
+                text = "Select Pool Matchup",
+                color = TvTextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            if (games.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(TvDarkSurface)
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        text = "General Championship / Super Bowl Pool",
+                        color = TvLimeAccent,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(games) { g ->
+                        val isSelected = selectedGame?.id == g.id
+                        TvFocusCard(
+                            onClick = { onSelectGame(g) },
+                            modifier = Modifier.width(220.dp),
+                            focusedBorderColor = TvOrangeFocus,
+                            borderColor = if (isSelected) TvOrangeFocus else Color.Transparent
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = g.league,
+                                        color = TvLimeAccent,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    if (isSelected) {
+                                        Text(
+                                            text = "ACTIVE",
+                                            color = TvOrangeFocus,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "${g.awayTeam.displayName} @ ${g.homeTeam.displayName}",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+
+        // 3. Pool Payouts Banner (20/20/20/40) & Availability Status
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(TvDarkSurface)
+                    .border(1.dp, TvDarkCardElevated, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Total Pot: ",
+                                color = TvTextSecondary,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                text = "$$totalPot",
+                                color = TvOrangeFocus,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "($totalSold/100 Sold · $openCount Open)",
+                                color = if (openCount > 0) TvLimeAccent else TvLiveRed,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        PayoutBadge(title = "1st Qtr (20%)", amount = q1Payout)
+                        PayoutBadge(title = "Halftime (20%)", amount = q2Payout)
+                        PayoutBadge(title = "3rd Qtr (20%)", amount = q3Payout)
+                        PayoutBadge(title = "Final (40%)", amount = finalPayout, isFinal = true)
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        // 4. Organizer Sales Desk: Initials Entry + Stepper + Payment Trigger
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(TvDarkCard)
+                    .border(1.dp, TvDarkCardElevated, RoundedCornerShape(12.dp))
+                    .padding(16.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "BUYER ENTRY (Random Auto-Placement Upon Payment)",
+                            color = TvOrangeFocus,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (openCount == 0) {
+                            Text(
+                                text = "BOARD IS FULL (100/100)",
+                                color = TvLiveRed,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Initials Input
+                        Column(modifier = Modifier.weight(1.2f)) {
+                            Text(
+                                text = "Buyer Initials (2-3 Letters):",
+                                color = TvTextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            OutlinedTextField(
+                                value = buyerInitials,
+                                onValueChange = { input ->
+                                    val filtered = input.filter { it.isLetter() }.take(3).uppercase()
+                                    buyerInitials = filtered
+                                },
+                                singleLine = true,
+                                placeholder = { Text("e.g. JDO", color = TvTextMuted, fontSize = 13.sp) },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = TvOrangeFocus,
+                                    unfocusedBorderColor = TvDarkCardElevated,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedContainerColor = TvDarkSurface,
+                                    unfocusedContainerColor = TvDarkSurface
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        // Number of Squares Stepper
+                        Column(modifier = Modifier.weight(1.2f)) {
+                            Text(
+                                text = "Quantity:",
+                                color = TvTextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(TvDarkSurface)
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                TvFocusButton(
+                                    text = "-",
+                                    onClick = { if (squareCount > 1) squareCount-- },
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Text(
+                                    text = "$squareCount Sq",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TvFocusButton(
+                                    text = "+",
+                                    onClick = { if (squareCount < openCount.coerceAtLeast(1)) squareCount++ },
+                                    modifier = Modifier.size(36.dp)
+                                )
+                            }
+                        }
+
+                        // Amount Due & Sell Button
+                        Column(modifier = Modifier.weight(1.6f)) {
+                            val totalDue = squareCount * squaresBoard.pricePerSquare
+                            Text(
+                                text = "Amount Due: $$totalDue ($$squaresBoard.pricePerSquare/sq)",
+                                color = TvLimeAccent,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            val canSell = buyerInitials.length in 2..3 && openCount >= squareCount
+                            TvFocusButton(
+                                text = if (openCount == 0) "Board Full" else "Select Payment ($$totalDue)",
+                                icon = Icons.Default.Payment,
+                                isPrimary = canSell,
+                                onClick = {
+                                    if (buyerInitials.length !in 2..3) {
+                                        Toast.makeText(context, "Please enter 2 or 3 buyer initials", Toast.LENGTH_SHORT).show()
+                                    } else if (openCount < squareCount) {
+                                        Toast.makeText(context, "Only $openCount squares available!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        showSellPaymentModal = true
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+
+                    // On-screen TV-friendly Quick Alphabet Bar
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "D-Pad Quick Letters:",
+                        color = TvTextMuted,
+                        fontSize = 11.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf("A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N", "P", "R", "S", "T", "W").forEach { char ->
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(TvDarkSurface)
+                                    .clickable {
+                                        if (buyerInitials.length < 3) buyerInitials += char
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(text = char, color = TvTextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(TvDarkCardElevated)
+                                .clickable {
+                                    if (buyerInitials.isNotEmpty()) buyerInitials = buyerInitials.dropLast(1)
+                                }
+                                .padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = "DEL", color = TvOrangeFocus, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(TvDarkCardElevated)
+                                .clickable { buyerInitials = "" }
+                                .padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = "CLEAR", color = TvTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        // 5. 10x10 Grid representation
+        item {
+            val awayTitle = selectedGame?.awayTeam?.displayName ?: "Away Team"
+            val homeTitle = selectedGame?.homeTeam?.displayName ?: "Home Team"
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(TvDarkSurface)
+                    .padding(16.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "$awayTitle (Top Columns) vs $homeTitle (Side Rows)",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Column headers (Away numbers 0-9)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .padding(1.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = "H\\A", color = TvTextMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                        squaresBoard.awayNumbers.forEach { num ->
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .padding(1.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(TvDarkCardElevated),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "$num",
+                                    color = TvLimeAccent,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                        }
+                    }
+
+                    // 10 Rows with Home numbers (0-9)
+                    for (r in 0 until 10) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                            val rowNum = squaresBoard.homeNumbers.getOrNull(r) ?: r
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .padding(1.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(TvDarkCardElevated),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "$rowNum",
+                                    color = TvOrangeFocus,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+
+                            // 10 Cells in this row
+                            for (c in 0 until 10) {
+                                val cellIndex = r * 10 + c
+                                val cell = squaresBoard.cells.getOrNull(cellIndex)
+                                val isClaimed = !cell?.ownerName.isNullOrBlank()
+
+                                val interactionSource = remember { MutableInteractionSource() }
+                                val isFocused by interactionSource.collectIsFocusedAsState()
+
+                                if (isFocused) {
+                                    focusedCellIndex = cellIndex
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .padding(1.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(
+                                            when {
+                                                isFocused -> Color.White
+                                                isClaimed -> TvOrangeFocus
+                                                else -> TvDarkCard
+                                            }
+                                        )
+                                        .border(
+                                            width = if (isFocused) 2.dp else 1.dp,
+                                            color = if (isFocused) TvOrangeFocus else TvDarkSurface,
+                                            shape = RoundedCornerShape(4.dp)
+                                        )
+                                        .focusable(interactionSource = interactionSource)
+                                        .clickable(interactionSource = interactionSource, indication = null) {
+                                            // The buyer never picks a square. Clicking displays square details info.
+                                            val owner = cell?.ownerName
+                                            val msg = if (!owner.isNullOrBlank()) {
+                                                "Square #${cellIndex + 1} (Row $r, Col $c) claimed by $owner"
+                                            } else {
+                                                "Square #${cellIndex + 1} (Row $r, Col $c) is OPEN"
+                                            }
+                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isClaimed) {
+                                        Text(
+                                            text = cell?.ownerName ?: "",
+                                            color = if (isFocused) Color.Black else Color.Black,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Black,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "${cellIndex + 1}",
+                                            color = if (isFocused) Color.Black else TvTextMuted.copy(alpha = 0.5f),
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Focused Square Inspection Details Bar
+                    Spacer(modifier = Modifier.height(10.dp))
+                    focusedCellIndex?.let { idx ->
+                        val cell = squaresBoard.cells.getOrNull(idx)
+                        val r = idx / 10
+                        val c = idx % 10
+                        val awayNum = squaresBoard.awayNumbers.getOrNull(c) ?: c
+                        val homeNum = squaresBoard.homeNumbers.getOrNull(r) ?: r
+                        val status = if (!cell?.ownerName.isNullOrBlank()) "Claimed by: ${cell?.ownerName}" else "Status: OPEN"
+
+                        Text(
+                            text = "Focused: Square #${idx + 1} · Row $r ($homeTitle: $homeNum) · Col $c ($awayTitle: $awayNum) · $status",
+                            color = TvTextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        // 6. Sales Log & Financial Tracking per Payment Method
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(TvDarkSurface)
+                    .padding(16.dp)
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "SALES & REVENUE SUMMARY",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Total Collected: $$totalRevenue",
+                            color = TvLimeAccent,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Breakdown per payment method
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        PaymentSummaryCard(
+                            method = "CASH",
+                            total = cashSales.sumOf { it.totalAmount },
+                            squaresCount = cashSales.sumOf { it.count },
+                            modifier = Modifier.weight(1f)
+                        )
+                        PaymentSummaryCard(
+                            method = "CASH APP",
+                            total = cashAppSales.sumOf { it.totalAmount },
+                            squaresCount = cashAppSales.sumOf { it.count },
+                            modifier = Modifier.weight(1f)
+                        )
+                        PaymentSummaryCard(
+                            method = "PAYPAL",
+                            total = paypalSales.sumOf { it.totalAmount },
+                            squaresCount = paypalSales.sumOf { it.count },
+                            modifier = Modifier.weight(1f)
+                        )
+                        PaymentSummaryCard(
+                            method = "ZELLE",
+                            total = zelleSales.sumOf { it.totalAmount },
+                            squaresCount = zelleSales.sumOf { it.count },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "Recent Transactions (${squaresBoard.sales.size} total sales):",
+                        color = TvTextSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (squaresBoard.sales.isEmpty()) {
+                        Text(
+                            text = "No squares sold yet. Enter buyer initials above to record first sale.",
+                            color = TvTextMuted,
+                            fontSize = 12.sp
+                        )
+                    } else {
+                        val sdf = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            squaresBoard.sales.take(8).forEach { sale ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(TvDarkCard)
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(TvOrangeFocus)
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = sale.initials,
+                                                color = Color.Black,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Black
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "${sale.count} square(s) · $$sale.totalAmount · ${sale.paymentMethod}",
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "[Sq ${sale.assignedSquares.joinToString { "#${it + 1}" }}]",
+                                            color = TvLimeAccent,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    Text(
+                                        text = sdf.format(Date(sale.timestamp)),
+                                        color = TvTextMuted,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ==========================================
+    // PAYMENT & AUTO-ASSIGNMENT MODAL
+    // ==========================================
+    if (showSellPaymentModal) {
+        val totalDue = squareCount * squaresBoard.pricePerSquare
+
+        Dialog(onDismissRequest = { showSellPaymentModal = false }) {
+            Box(
+                modifier = Modifier
+                    .width(480.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(TvDarkSurface)
+                    .border(2.dp, TvOrangeFocus, RoundedCornerShape(16.dp))
+                    .padding(24.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Payment: $buyerInitials ($squareCount Square${if (squareCount > 1) "s" else ""})",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Total Due: $$totalDue ($$squaresBoard.pricePerSquare each)",
+                        color = TvLimeAccent,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Black
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Payment Method Tabs
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf("CASH", "CASH APP", "PAYPAL", "ZELLE").forEach { method ->
+                            val isSel = selectedSellMethod == method
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSel) TvOrangeFocus else TvDarkCardElevated)
+                                    .clickable { selectedSellMethod = method }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = method,
+                                    color = if (isSel) Color.Black else Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Method Details
+                    when (selectedSellMethod) {
+                        "CASH" -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(TvDarkCard)
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = Icons.Default.MonetizationOn,
+                                        contentDescription = "Cash",
+                                        tint = TvLimeAccent,
+                                        modifier = Modifier.size(48.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Collect $$totalDue in Cash",
+                                        color = Color.White,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "Squares will be assigned randomly immediately upon receipt.",
+                                        color = TvTextSecondary,
+                                        fontSize = 12.sp,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+
+                        else -> {
+                            // QR Option: Cash App, PayPal, Zelle
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(TvDarkCard)
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(110.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color.White),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.QrCode2,
+                                            contentDescription = "QR Code",
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(90.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = when (selectedSellMethod) {
+                                            "CASH APP" -> "Scan to Pay $$totalDue on Cash App: \$MaZzeSports"
+                                            "PAYPAL" -> "Scan to Pay $$totalDue on PayPal: @MaZzeSportsTV"
+                                            else -> "Zelle to $$totalDue: payments@mazzesports.tv"
+                                        },
+                                        color = TvTextSecondary,
+                                        fontSize = 12.sp,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // "Payment Received" / "Cash Received" Auto-Assign Button
+                    TvFocusButton(
+                        text = if (selectedSellMethod == "CASH") "Cash Received ($$totalDue) - Assign Squares" else "Payment Received ($$totalDue) - Assign Squares",
+                        icon = Icons.Default.CheckCircle,
+                        isPrimary = true,
+                        onClick = {
+                            val assigned = onSellSquares(buyerInitials, squareCount, selectedSellMethod)
+                            showSellPaymentModal = false
+                            if (assigned.isNotEmpty()) {
+                                assignedConfirmation = Pair(buyerInitials, assigned)
+                                buyerInitials = ""
+                                squareCount = 1
+                            } else {
+                                Toast.makeText(context, "Could not assign squares. Board may be full.", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    TvFocusButton(
+                        text = "Cancel",
+                        onClick = { showSellPaymentModal = false },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+    }
+
+    // ==========================================
+    // ASSIGNMENT CONFIRMATION DIALOG
+    // ==========================================
+    assignedConfirmation?.let { (initials, squares) ->
+        Dialog(onDismissRequest = { assignedConfirmation = null }) {
+            Box(
+                modifier = Modifier
+                    .width(440.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(TvDarkSurface)
+                    .border(2.dp, TvLimeAccent, RoundedCornerShape(16.dp))
+                    .padding(24.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Success",
+                        tint = TvLimeAccent,
+                        modifier = Modifier.size(54.dp)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Payment Received!",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "${squares.size} square(s) assigned to $initials:",
+                        color = TvTextSecondary,
+                        fontSize = 13.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(TvDarkCard)
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        squares.forEach { idx ->
+                            val r = idx / 10
+                            val c = idx % 10
+                            val awayNum = squaresBoard.awayNumbers.getOrNull(c) ?: c
+                            val homeNum = squaresBoard.homeNumbers.getOrNull(r) ?: r
+                            Text(
+                                text = "• Square #${idx + 1}: Row $r (Home: $homeNum), Col $c (Away: $awayNum)",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    TvFocusButton(
+                        text = "OK - Board Updated",
+                        isPrimary = true,
+                        onClick = { assignedConfirmation = null },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+    }
+
+    // ==========================================
+    // ADMIN PIN DIALOGS & RESET PROTECTION
+    // ==========================================
+    when (adminDialog) {
+        AdminDialogState.None -> {}
+
+        AdminDialogState.SetInitialPin, AdminDialogState.SetNewPin -> {
+            var step by remember { mutableIntStateOf(1) } // 1: enter, 2: confirm
+
+            Dialog(onDismissRequest = { adminDialog = AdminDialogState.None }) {
+                Box(
+                    modifier = Modifier
+                        .width(420.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(TvDarkSurface)
+                        .border(1.dp, TvOrangeFocus, RoundedCornerShape(16.dp))
+                        .padding(24.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = if (adminDialog == AdminDialogState.SetNewPin) "Change Admin PIN" else "Set Admin PIN",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (step == 1) "Enter a 4 to 6 digit Admin PIN" else "Confirm Admin PIN (enter again)",
+                            color = TvTextSecondary,
+                            fontSize = 12.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // PIN Display
+                        val currentInput = if (step == 1) pinFirstEntry else pinSecondEntry
+                        PinBulletsDisplay(input = currentInput, maxDigits = 6)
+
+                        pinErrorText?.let {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(text = it, color = TvLiveRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // On-screen TV Keypad
+                        TvPinKeypad(
+                            onDigit = { d ->
+                                if (currentInput.length < 6) {
+                                    pinErrorText = null
+                                    if (step == 1) pinFirstEntry += d else pinSecondEntry += d
+                                }
+                            },
+                            onBackspace = {
+                                if (step == 1 && pinFirstEntry.isNotEmpty()) pinFirstEntry = pinFirstEntry.dropLast(1)
+                                if (step == 2 && pinSecondEntry.isNotEmpty()) pinSecondEntry = pinSecondEntry.dropLast(1)
+                            },
+                            onClear = {
+                                if (step == 1) pinFirstEntry = "" else pinSecondEntry = ""
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            TvFocusButton(
+                                text = "Cancel",
+                                onClick = { adminDialog = AdminDialogState.None },
+                                modifier = Modifier.weight(1f)
+                            )
+                            TvFocusButton(
+                                text = if (step == 1) "Next" else "Save PIN",
+                                isPrimary = true,
+                                onClick = {
+                                    if (step == 1) {
+                                        if (pinFirstEntry.length < 4) {
+                                            pinErrorText = "PIN must be 4 to 6 digits"
+                                        } else {
+                                            pinErrorText = null
+                                            step = 2
+                                        }
+                                    } else {
+                                        if (pinFirstEntry == pinSecondEntry) {
+                                            adminManager.setPin(pinFirstEntry)
+                                            Toast.makeText(context, "Admin PIN Saved Successfully!", Toast.LENGTH_SHORT).show()
+                                            adminDialog = AdminDialogState.None
+                                        } else {
+                                            pinErrorText = "PINs do not match. Try again."
+                                            pinSecondEntry = ""
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        AdminDialogState.EnterPinForReset, AdminDialogState.EnterPinForChange -> {
+            val isForChange = adminDialog == AdminDialogState.EnterPinForChange
+
+            Dialog(onDismissRequest = { adminDialog = AdminDialogState.None }) {
+                Box(
+                    modifier = Modifier
+                        .width(420.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(TvDarkSurface)
+                        .border(1.dp, TvOrangeFocus, RoundedCornerShape(16.dp))
+                        .padding(24.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = if (isForChange) "Verify Current Admin PIN" else "Admin Authentication",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (isForChange) "Enter current PIN to change it" else "Enter Admin PIN to reset board",
+                            color = TvTextSecondary,
+                            fontSize = 12.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        if (lockoutRemaining > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(TvLiveRed.copy(alpha = 0.2f))
+                                    .padding(10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Locked out. Try again in ${lockoutRemaining}s",
+                                    color = TvLiveRed,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            PinBulletsDisplay(input = pinCurrentEntry, maxDigits = 6)
+                        }
+
+                        pinErrorText?.let {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(text = it, color = TvLiveRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        if (lockoutRemaining == 0) {
+                            TvPinKeypad(
+                                onDigit = { d ->
+                                    if (pinCurrentEntry.length < 6) {
+                                        pinErrorText = null
+                                        pinCurrentEntry += d
+                                    }
+                                },
+                                onBackspace = {
+                                    if (pinCurrentEntry.isNotEmpty()) pinCurrentEntry = pinCurrentEntry.dropLast(1)
+                                },
+                                onClear = { pinCurrentEntry = "" }
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            TvFocusButton(
+                                text = "Cancel",
+                                onClick = { adminDialog = AdminDialogState.None },
+                                modifier = Modifier.weight(1f)
+                            )
+                            TvFocusButton(
+                                text = "Submit",
+                                isPrimary = true,
+                                onClick = {
+                                    if (lockoutRemaining > 0) return@TvFocusButton
+                                    if (adminManager.verifyPin(pinCurrentEntry)) {
+                                        pinErrorText = null
+                                        pinCurrentEntry = ""
+                                        adminDialog = if (isForChange) {
+                                            pinFirstEntry = ""
+                                            pinSecondEntry = ""
+                                            AdminDialogState.SetNewPin
+                                        } else {
+                                            AdminDialogState.ConfirmReset
+                                        }
+                                    } else {
+                                        val remainingLockout = adminManager.getRemainingLockoutSeconds()
+                                        if (remainingLockout > 0) {
+                                            lockoutRemaining = remainingLockout
+                                            pinErrorText = "Too many failed attempts. Locked for 60 seconds."
+                                        } else {
+                                            val attempts = adminManager.getFailedAttempts()
+                                            pinErrorText = "Incorrect PIN. ${5 - attempts} attempt(s) remaining."
+                                        }
+                                        pinCurrentEntry = ""
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        if (!isForChange) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            TvFocusButton(
+                                text = "Change Admin PIN",
+                                onClick = {
+                                    pinErrorText = null
+                                    pinCurrentEntry = ""
+                                    adminDialog = AdminDialogState.EnterPinForChange
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        AdminDialogState.ConfirmReset -> {
+            Dialog(onDismissRequest = { adminDialog = AdminDialogState.None }) {
+                Box(
+                    modifier = Modifier
+                        .width(420.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(TvDarkSurface)
+                        .border(2.dp, TvLiveRed, RoundedCornerShape(16.dp))
+                        .padding(24.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Warning",
+                            tint = TvLiveRed,
+                            modifier = Modifier.size(54.dp)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Reset This Board?",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Clear all 100 squares and sales records on this board? This cannot be undone.",
+                            color = TvTextSecondary,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center
+                        )
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            TvFocusButton(
+                                text = "Cancel",
+                                onClick = { adminDialog = AdminDialogState.None },
+                                modifier = Modifier.weight(1f)
+                            )
+                            TvFocusButton(
+                                text = "Yes, Clear Board",
+                                isPrimary = true,
+                                onClick = {
+                                    onResetBoard()
+                                    adminDialog = AdminDialogState.None
+                                    Toast.makeText(context, "Board and sales have been reset!", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PayoutBadge(title: String, amount: Int, isFinal: Boolean = false) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = title,
+            color = if (isFinal) TvOrangeFocus else TvTextMuted,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = "$$amount",
+            color = if (isFinal) TvOrangeFocus else Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun PaymentSummaryCard(
+    method: String,
+    total: Int,
+    squaresCount: Int,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(TvDarkCard)
+            .padding(10.dp)
+    ) {
+        Column {
+            Text(
+                text = method,
+                color = when (method) {
+                    "CASH" -> TvLimeAccent
+                    "CASH APP" -> Color(0xFF00D632)
+                    "PAYPAL" -> Color(0xFF0079C1)
+                    else -> Color(0xFF7414CA) // Zelle
+                },
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "$$total",
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "$squaresCount sq sold",
+                color = TvTextMuted,
+                fontSize = 10.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun PinBulletsDisplay(input: String, maxDigits: Int = 6) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        for (i in 0 until maxDigits) {
+            val filled = i < input.length
+            Box(
+                modifier = Modifier
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(if (filled) TvOrangeFocus else TvDarkCardElevated)
+                    .border(1.dp, if (filled) Color.White else TvDarkCardElevated, CircleShape)
+            )
+        }
+    }
+}
+
+@Composable
+private fun TvPinKeypad(
+    onDigit: (Int) -> Unit,
+    onBackspace: () -> Unit,
+    onClear: () -> Unit
+) {
+    val rows = listOf(
+        listOf("1", "2", "3"),
+        listOf("4", "5", "6"),
+        listOf("7", "8", "9"),
+        listOf("CLEAR", "0", "DEL")
+    )
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        rows.forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { key ->
+                    val interactionSource = remember { MutableInteractionSource() }
+                    val isFocused by interactionSource.collectIsFocusedAsState()
+
+                    Box(
+                        modifier = Modifier
+                            .width(64.dp)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                when {
+                                    isFocused -> TvOrangeFocus
+                                    key in listOf("CLEAR", "DEL") -> TvDarkCardElevated
+                                    else -> TvDarkCard
+                                }
+                            )
+                            .border(
+                                BorderStroke(
+                                    if (isFocused) 2.dp else 1.dp,
+                                    if (isFocused) Color.White else Color.Transparent
+                                ),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .focusable(interactionSource = interactionSource)
+                            .clickable(interactionSource = interactionSource, indication = null) {
+                                when (key) {
+                                    "CLEAR" -> onClear()
+                                    "DEL" -> onBackspace()
+                                    else -> key.toIntOrNull()?.let { onDigit(it) }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = key,
+                            color = if (isFocused) Color.Black else Color.White,
+                            fontSize = if (key.length > 1) 12.sp else 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

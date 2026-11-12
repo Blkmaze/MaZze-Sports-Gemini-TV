@@ -605,7 +605,7 @@ fun ApTop20Card(
     TvFocusCard(
         onClick = onClick,
         modifier = modifier
-            .width(200.dp)
+            .width(220.dp)
             .height(58.dp),
         shape = RoundedCornerShape(10.dp)
     ) { isFocused ->
@@ -645,10 +645,16 @@ fun ApTop20Card(
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis
                 )
-                if (rankItem.isSec) {
+                val subText = when {
+                    rankItem.record.isNotBlank() && rankItem.isSec -> "${rankItem.record} · SEC"
+                    rankItem.record.isNotBlank() -> rankItem.record
+                    rankItem.isSec -> "SEC"
+                    else -> ""
+                }
+                if (subText.isNotBlank()) {
                     Text(
-                        text = "SEC",
-                        color = TvLimeAccent,
+                        text = subText,
+                        color = if (rankItem.isSec) TvLimeAccent else TvTextSecondary,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 10.sp,
                         maxLines = 1,

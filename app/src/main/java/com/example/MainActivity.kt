@@ -99,12 +99,14 @@ class MainActivity : ComponentActivity() {
 
                 val squaresSelectedGame by viewModel.squaresSelectedGame.collectAsStateWithLifecycle()
                 val squaresBoard by viewModel.squaresBoard.collectAsStateWithLifecycle()
+                val squaresBoardVersions by viewModel.squaresBoardVersions.collectAsStateWithLifecycle()
                 val showSquaresQrDialog by viewModel.showSquaresQrDialog.collectAsStateWithLifecycle()
                 val squaresPaymentMethod by viewModel.squaresPaymentMethod.collectAsStateWithLifecycle()
 
                 val playlistConfig by viewModel.playlistConfig.collectAsStateWithLifecycle()
                 val updateInfo by viewModel.updateInfo.collectAsStateWithLifecycle()
                 val ncaaFootballData by viewModel.ncaaFootballData.collectAsStateWithLifecycle()
+                val ncaaWomensRankings by viewModel.ncaaWomensRankings.collectAsStateWithLifecycle()
                 val channelSearchFilter by viewModel.channelSearchFilter.collectAsStateWithLifecycle()
                 val lastCrashReport by viewModel.lastCrashReport.collectAsStateWithLifecycle()
                 var showStartupCrashDialog by remember(lastCrashReport) {
@@ -159,6 +161,7 @@ class MainActivity : ComponentActivity() {
                                         hotThisWeekGames = hotThisWeekGames,
                                         channels = channels,
                                         ncaaFootballData = ncaaFootballData,
+                                        ncaaWomensRankings = ncaaWomensRankings,
                                         currentPlayingChannel = currentPlayingChannel,
                                         isOffline = isOffline,
                                         lastUpdatedTime = lastUpdatedTime,
@@ -223,14 +226,25 @@ class MainActivity : ComponentActivity() {
                                         games = games,
                                         selectedGame = squaresSelectedGame,
                                         squaresBoard = squaresBoard,
+                                        boardVersions = squaresBoardVersions,
                                         showPaymentDialog = showSquaresQrDialog,
                                         paymentMethod = squaresPaymentMethod,
                                         onSelectGame = { viewModel.selectGameForSquares(it) },
                                         onSelectPrice = { viewModel.setSquaresPrice(it) },
+                                        onSelectPayoutType = { viewModel.setSquaresPayoutType(it) },
                                         onToggleSquare = { r, c -> viewModel.toggleSquareSelection(r, c) },
                                         onOpenPayment = { viewModel.openPaymentQr(it) },
                                         onClosePayment = { viewModel.closePaymentQr() },
-                                        onOpenBrowser = { viewModel.openBrowserLink(it) }
+                                        onOpenBrowser = { viewModel.openBrowserLink(it) },
+                                        onSubmitPendingEntry = { initials, count, method -> viewModel.submitPendingEntry(initials, count, method) },
+                                        onConfirmPendingPaid = { viewModel.confirmPendingPaid(it) },
+                                        onRejectPendingEntry = { viewModel.rejectPendingEntry(it) },
+                                        onReleaseAllPending = { viewModel.releaseAllPending() },
+                                        onToggleLockBoard = { viewModel.toggleLockBoard() },
+                                        onLockNumbers = { viewModel.lockNumbers() },
+                                        onCreateNextBoardVersion = { viewModel.createNextBoardVersion() },
+                                        onSwitchBoardVersion = { viewModel.switchBoardVersion(it) },
+                                        onResetBoard = { viewModel.resetSquaresBoard() }
                                     )
 
                                     4 -> SettingsScreen(

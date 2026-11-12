@@ -34,6 +34,7 @@ class EspnScoreboardRepository(
         LeagueTarget("hockey", "nhl", "NHL"),
         LeagueTarget("football", "college-football", "CFB"),
         LeagueTarget("basketball", "mens-college-basketball", "NCAAM"),
+        LeagueTarget("basketball", "womens-college-basketball", "NCAAW"),
         LeagueTarget("soccer", "eng.1", "EPL"),
         LeagueTarget("soccer", "usa.1", "MLS")
     )
@@ -58,7 +59,11 @@ class EspnScoreboardRepository(
             val allGames = mutableListOf<Game>()
             for (target in leagues) {
                 try {
-                    val url = "https://site.api.espn.com/apis/site/v2/sports/${target.sport}/${target.league}/scoreboard"
+                    val url = if (target.sport == "basketball" && (target.league == "mens-college-basketball" || target.league == "womens-college-basketball")) {
+                        "https://site.api.espn.com/apis/site/v2/sports/${target.sport}/${target.league}/scoreboard?groups=50&limit=100"
+                    } else {
+                        "https://site.api.espn.com/apis/site/v2/sports/${target.sport}/${target.league}/scoreboard"
+                    }
                     val req = Request.Builder().url(url).header("User-Agent", "MaZzeSportsTV/1.0").build()
                     client.newCall(req).execute().use { response ->
                         if (response.isSuccessful) {
@@ -81,7 +86,9 @@ class EspnScoreboardRepository(
         LeagueTarget("baseball", "mlb", "MLB"),
         LeagueTarget("basketball", "wnba", "WNBA"),
         LeagueTarget("basketball", "nba", "NBA"),
-        LeagueTarget("hockey", "nhl", "NHL")
+        LeagueTarget("hockey", "nhl", "NHL"),
+        LeagueTarget("basketball", "mens-college-basketball", "NCAAM"),
+        LeagueTarget("basketball", "womens-college-basketball", "NCAAW")
     )
 
     suspend fun fetchWeekScoreboards(): Result<List<Game>> = withContext(Dispatchers.IO) {
@@ -97,7 +104,11 @@ class EspnScoreboardRepository(
                 val dateParam = ymd.format(cal.time)
                 for (target in weekLeagues) {
                     try {
-                        val url = "https://site.api.espn.com/apis/site/v2/sports/${target.sport}/${target.league}/scoreboard?dates=$dateParam"
+                        val url = if (target.sport == "basketball" && (target.league == "mens-college-basketball" || target.league == "womens-college-basketball")) {
+                            "https://site.api.espn.com/apis/site/v2/sports/${target.sport}/${target.league}/scoreboard?dates=$dateParam&groups=50&limit=100"
+                        } else {
+                            "https://site.api.espn.com/apis/site/v2/sports/${target.sport}/${target.league}/scoreboard?dates=$dateParam"
+                        }
                         val req = Request.Builder().url(url).header("User-Agent", "MaZzeSportsTV/1.0").build()
                         client.newCall(req).execute().use { response ->
                             if (response.isSuccessful) {
@@ -144,10 +155,17 @@ class EspnScoreboardRepository(
                     val score = compObj.optString("score", "0")
                     val teamObj = compObj.optJSONObject("team")
                     val tId = teamObj?.optString("id", "") ?: ""
-                    val tName = teamObj?.optString("displayName", "") ?: ""
+                    var tName = teamObj?.optString("displayName", "") ?: ""
                     val tAbbr = teamObj?.optString("abbreviation", "") ?: ""
                     val tLogo = teamObj?.optString("logo", "") ?: ""
                     val tColor = teamObj?.optString("color", "") ?: ""
+
+                    val curatedRankObj = compObj.optJSONObject("curatedRank")
+                    val currentRank = curatedRankObj?.optInt("current", 99) ?: 99
+                    if (currentRank in 1..25 && !tName.startsWith("#")) {
+                        tName = "#$currentRank $tName"
+                    }
+
                     val team = Team(tId, tName, tAbbr, tLogo, tColor)
 
                     if (homeAway == "home") {
@@ -412,6 +430,60 @@ class EspnScoreboardRepository(
             }
         } catch (e: Throwable) {
             shortDetail.ifBlank { "Upcoming" }
+        }
+    }
+
+    suspend fun fetchWomensBasketballRankings(): Result<List<ApTeamRank>> = withContext(Dispatchers.IO) {
+        try {
+            val rankings = mutableListOf<ApTeamRank>()
+            val rankUrl = "https://site.api.espn.com/apis/site/v2/sports/basketball/womens-college-basketball/rankings"
+            val req = Request.Builder().url(rankUrl).header("User-Agent", "MaZzeSportsTV/1.0").build()
+            client.newCall(req).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    val root = JSONObject(body)
+                    val rankingsArr = root.optJSONArray("rankings")
+                    if (rankingsArr != null && rankingsArr.length() > 0) {
+                        val poll = rankingsArr.optJSONObject(0)
+                        val ranks = poll?.optJSONArray("ranks")
+                        if (ranks != null) {
+                            for (i in 0 until ranks.length()) {
+                                val rObj = ranks.optJSONObject(i) ?: continue
+                                val currentRank = rObj.optInt("current", i + 1)
+                                val record = rObj.optString("recordSummary", "").ifBlank {
+                                    rObj.optString("record", "")
+                                }
+                                val teamObj = rObj.optJSONObject("team") ?: continue
+                                val tId = teamObj.optString("id", "")
+                                val tName = teamObj.optString("name", "")
+                                val tLocation = teamObj.optString("location", "")
+                                val tDisplay = if (tLocation.isNotBlank()) tLocation else teamObj.optString("nickname", tName)
+                                val tAbbr = teamObj.optString("abbreviation", "")
+                                val tLogo = teamObj.optString("logo", "")
+                                val isSec = isSecTeam(tName, tLocation, tAbbr)
+
+                                if (currentRank <= 25) {
+                                    rankings.add(
+                                        ApTeamRank(
+                                            rank = currentRank,
+                                            name = tName,
+                                            displayName = tDisplay,
+                                            abbreviation = tAbbr,
+                                            logoUrl = tLogo,
+                                            isSec = isSec,
+                                            teamId = tId,
+                                            record = record
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Result.success(rankings)
+        } catch (e: Throwable) {
+            Result.failure(e)
         }
     }
 }

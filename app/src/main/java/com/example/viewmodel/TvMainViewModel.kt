@@ -27,6 +27,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     private val espnRepo = EspnScoreboardRepository()
     private val playlistRepo = PlaylistRepository(application)
     private val updaterRepo = UpdaterRepository(application)
+    private val squaresStorage = com.example.util.SquaresStorage(application)
 
     private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
         // Safe swallow: prevent unhandled coroutine failure from killing the app process
@@ -82,6 +83,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     private val _squaresBoard = MutableStateFlow(createInitialSquaresBoard(""))
     val squaresBoard: StateFlow<SquaresBoard> = _squaresBoard.asStateFlow()
 
+    private val _squaresBoardVersions = MutableStateFlow<List<Int>>(listOf(1))
+    val squaresBoardVersions: StateFlow<List<Int>> = _squaresBoardVersions.asStateFlow()
+
     private val _showSquaresQrDialog = MutableStateFlow(false)
     val showSquaresQrDialog: StateFlow<Boolean> = _showSquaresQrDialog.asStateFlow()
 
@@ -96,6 +100,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _ncaaFootballData = MutableStateFlow(NcaaFootballData())
     val ncaaFootballData: StateFlow<NcaaFootballData> = _ncaaFootballData.asStateFlow()
+
+    private val _ncaaWomensRankings = MutableStateFlow<List<ApTeamRank>>(emptyList())
+    val ncaaWomensRankings: StateFlow<List<ApTeamRank>> = _ncaaWomensRankings.asStateFlow()
 
     private val _channelSearchFilter = MutableStateFlow("")
     val channelSearchFilter: StateFlow<String> = _channelSearchFilter.asStateFlow()
@@ -367,6 +374,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         ncaaPollJob = viewModelScope.launch(exceptionHandler) {
             while (true) {
                 fetchNcaaFootball()
+                fetchWomensBasketball()
                 delay(60000)
             }
         }
@@ -376,6 +384,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(exceptionHandler) {
             fetchScoreboards()
             fetchNcaaFootball()
+            fetchWomensBasketball()
             fetchWeekScoreboards()
         }
     }
@@ -522,13 +531,17 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
             score += nbaScore
         }
 
-        // 6. NFL games (general) and ranked NCAA football games
+        // 6. NFL games (general) and ranked college games (CFB, NCAAW, NCAAM)
         if (league == "nfl" && !isMnf && !isSnf && !isTnf) {
             score += 180_000L
         }
-        if (league == "cfb" || league.contains("college")) {
+        if (league == "cfb" || league == "ncaaw" || league == "ncaam" || league.contains("college")) {
             val isRanked = combined.contains("#") ||
-                    (game.homeTeam.displayName.startsWith("#") || game.awayTeam.displayName.startsWith("#"))
+                    (game.homeTeam.displayName.startsWith("#") || game.awayTeam.displayName.startsWith("#")) ||
+                    _ncaaWomensRankings.value.any { rankItem ->
+                        val lower = rankItem.displayName.lowercase(Locale.ROOT)
+                        lower.length > 2 && (home.contains(lower) || away.contains(lower))
+                    }
             if (isRanked) {
                 score += 170_000L
             } else {
@@ -581,6 +594,16 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         } catch (e: Throwable) {}
     }
 
+    private suspend fun fetchWomensBasketball() {
+        try {
+            val result = espnRepo.fetchWomensBasketballRankings()
+            result.onSuccess { rankings ->
+                _ncaaWomensRankings.value = rankings
+                recomputeHotGames()
+            }
+        } catch (e: Throwable) {}
+    }
+
     private fun getMarqueeScore(game: Game): Int {
         val nameLower = game.name.lowercase(Locale.ROOT)
         val leagueLower = game.league.lowercase(Locale.ROOT)
@@ -595,6 +618,8 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
             combined.contains("wnba finals") -> 850
             leagueLower == "wnba" -> 800
             leagueLower == "cfb" || leagueLower.contains("college-football") || leagueLower.contains("cfb") -> 700
+            leagueLower == "ncaaw" || leagueLower.contains("womens-college-basketball") -> 680
+            leagueLower == "ncaam" || leagueLower.contains("mens-college-basketball") -> 650
             leagueLower == "nba" -> 600
             leagueLower == "nhl" -> 500
             else -> 100
@@ -714,6 +739,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
             listOf("espn2", "espn 2"),
             listOf("espnews", "espn news"),
             listOf("espnu", "espn u"),
+            listOf("espn w", "espnw"),
             listOf("sec network", "secn"),
             listOf("acc network", "accn"),
             listOf("fs1", "fox sports 1"),
@@ -775,16 +801,214 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         _currentPlayingChannel.value = pool[prevIdx]
     }
 
+    private fun getDefaultPayoutTypeForGame(game: Game?): String {
+        if (game == null) return "QUARTERS"
+        val league = game.league.lowercase(Locale.ROOT)
+        val name = game.name.lowercase(Locale.ROOT)
+        val sport = game.sport.lowercase(Locale.ROOT)
+        return if (league == "ncaam" || league.contains("college basketball") || (sport.contains("basketball") && league.contains("ncaa"))) {
+            "HALVES"
+        } else {
+            "QUARTERS"
+        }
+    }
+
     fun selectGameForSquares(game: Game) {
         _squaresSelectedGame.value = game
-        _squaresBoard.value = createInitialSquaresBoard(game.id)
+        val activeVer = squaresStorage.getActiveVersion(game.id)
+        val existing = squaresStorage.loadBoard(game.id, activeVer)
+        val defaultPayout = getDefaultPayoutTypeForGame(game)
+        if (existing != null) {
+            _squaresBoard.value = existing
+        } else {
+            val fresh = createInitialSquaresBoard(game.id, activeVer, defaultPayout)
+            _squaresBoard.value = fresh
+            squaresStorage.saveBoard(fresh)
+        }
+        _squaresBoardVersions.value = squaresStorage.getBoardVersions(game.id)
     }
 
     fun setSquaresPrice(price: Int) {
-        _squaresBoard.value = _squaresBoard.value.copy(pricePerSquare = price)
+        val board = _squaresBoard.value
+        if (board.sales.isNotEmpty() || board.pendingEntries.isNotEmpty()) return
+        val updated = board.copy(pricePerSquare = price)
+        _squaresBoard.value = updated
+        squaresStorage.saveBoard(updated)
+    }
+
+    fun setSquaresPayoutType(type: String) {
+        val board = _squaresBoard.value
+        if (board.sales.isNotEmpty() || board.pendingEntries.isNotEmpty()) return
+        val updated = board.copy(payoutType = type)
+        _squaresBoard.value = updated
+        squaresStorage.saveBoard(updated)
+    }
+
+    fun submitPendingEntry(initials: String, count: Int, paymentMethod: String): Boolean {
+        val board = _squaresBoard.value
+        if (board.isBoardLocked) return false
+        val cleanInitials = initials.trim().uppercase().take(3)
+        if (cleanInitials.length < 2) return false
+        val soldCount = board.cells.count { it.ownerName.isNotBlank() }
+        val pendingCount = board.pendingEntries.sumOf { it.count }
+        val available = (100 - soldCount - pendingCount).coerceAtLeast(0)
+        if (count <= 0 || count > available) return false
+
+        val entry = SquarePendingEntry(
+            id = UUID.randomUUID().toString(),
+            initials = cleanInitials,
+            count = count,
+            paymentMethod = paymentMethod.uppercase(),
+            totalAmount = count * board.pricePerSquare,
+            timestamp = System.currentTimeMillis()
+        )
+        val updatedBoard = board.copy(pendingEntries = board.pendingEntries + entry)
+        _squaresBoard.value = updatedBoard
+        squaresStorage.saveBoard(updatedBoard)
+        return true
+    }
+
+    fun confirmPendingPaid(entryId: String): List<Int> {
+        val board = _squaresBoard.value
+        val entry = board.pendingEntries.firstOrNull { it.id == entryId } ?: return emptyList()
+        val openCells = board.cells.filter { it.ownerName.isBlank() }
+        if (openCells.size < entry.count) return emptyList()
+
+        val chosenCells = openCells.shuffled().take(entry.count)
+        val chosenIndices = chosenCells.map { it.index }.toSet()
+
+        val updatedCells = board.cells.map { cell ->
+            if (cell.index in chosenIndices) {
+                cell.copy(ownerName = entry.initials, isUserSquare = true)
+            } else {
+                cell
+            }
+        }
+
+        val sale = SquareSale(
+            id = UUID.randomUUID().toString(),
+            initials = entry.initials,
+            count = chosenCells.size,
+            paymentMethod = entry.paymentMethod,
+            assignedSquares = chosenCells.map { it.index },
+            totalAmount = chosenCells.size * board.pricePerSquare,
+            timestamp = System.currentTimeMillis()
+        )
+
+        val updatedPending = board.pendingEntries.filter { it.id != entryId }
+        val updatedBoard = board.copy(
+            cells = updatedCells,
+            pendingEntries = updatedPending,
+            sales = listOf(sale) + board.sales
+        )
+        _squaresBoard.value = updatedBoard
+        squaresStorage.saveBoard(updatedBoard)
+        return chosenCells.map { it.index }
+    }
+
+    fun rejectPendingEntry(entryId: String) {
+        val board = _squaresBoard.value
+        val updatedPending = board.pendingEntries.filter { it.id != entryId }
+        val updatedBoard = board.copy(pendingEntries = updatedPending)
+        _squaresBoard.value = updatedBoard
+        squaresStorage.saveBoard(updatedBoard)
+    }
+
+    fun releaseAllPending() {
+        val board = _squaresBoard.value
+        val updatedBoard = board.copy(pendingEntries = emptyList())
+        _squaresBoard.value = updatedBoard
+        squaresStorage.saveBoard(updatedBoard)
+    }
+
+    fun toggleLockBoard() {
+        val board = _squaresBoard.value
+        val updatedBoard = board.copy(isBoardLocked = !board.isBoardLocked)
+        _squaresBoard.value = updatedBoard
+        squaresStorage.saveBoard(updatedBoard)
+    }
+
+    fun lockNumbers() {
+        val board = _squaresBoard.value
+        if (board.isNumbersLocked) return
+        val updatedBoard = board.copy(
+            isNumbersLocked = true,
+            homeNumbers = (0..9).shuffled(),
+            awayNumbers = (0..9).shuffled()
+        )
+        _squaresBoard.value = updatedBoard
+        squaresStorage.saveBoard(updatedBoard)
+    }
+
+    fun createNextBoardVersion() {
+        val gameId = _squaresSelectedGame.value?.id ?: _squaresBoard.value.gameId
+        val versions = squaresStorage.getBoardVersions(gameId)
+        val nextVer = (versions.maxOrNull() ?: 1) + 1
+        val defaultPayout = _squaresBoard.value.payoutType
+        val fresh = createInitialSquaresBoard(gameId, nextVer, defaultPayout).copy(
+            pricePerSquare = _squaresBoard.value.pricePerSquare
+        )
+        squaresStorage.saveBoard(fresh)
+        squaresStorage.setActiveVersion(gameId, nextVer)
+        _squaresBoard.value = fresh
+        _squaresBoardVersions.value = squaresStorage.getBoardVersions(gameId)
+    }
+
+    fun switchBoardVersion(version: Int) {
+        val gameId = _squaresSelectedGame.value?.id ?: _squaresBoard.value.gameId
+        val loaded = squaresStorage.loadBoard(gameId, version) ?: return
+        squaresStorage.setActiveVersion(gameId, version)
+        _squaresBoard.value = loaded
+    }
+
+    fun sellSquares(initials: String, count: Int, paymentMethod: String): List<Int> {
+        val board = _squaresBoard.value
+        val openCells = board.cells.filter { it.ownerName.isBlank() }
+        if (openCells.size < count) return emptyList()
+
+        val chosenCells = openCells.shuffled().take(count)
+        val chosenIndices = chosenCells.map { it.index }.toSet()
+
+        val updatedCells = board.cells.map { cell ->
+            if (cell.index in chosenIndices) {
+                cell.copy(ownerName = initials.uppercase(), isUserSquare = true)
+            } else {
+                cell
+            }
+        }
+
+        val sale = SquareSale(
+            id = UUID.randomUUID().toString(),
+            initials = initials.uppercase(),
+            count = count,
+            paymentMethod = paymentMethod.uppercase(),
+            assignedSquares = chosenCells.map { it.index },
+            totalAmount = count * board.pricePerSquare,
+            timestamp = System.currentTimeMillis()
+        )
+
+        val updatedBoard = board.copy(
+            cells = updatedCells,
+            sales = listOf(sale) + board.sales
+        )
+        _squaresBoard.value = updatedBoard
+        squaresStorage.saveBoard(updatedBoard)
+        return chosenCells.map { it.index }
+    }
+
+    fun resetSquaresBoard() {
+        val gameId = _squaresSelectedGame.value?.id ?: _squaresBoard.value.gameId
+        val currentVer = _squaresBoard.value.boardVersion
+        val defaultPayout = getDefaultPayoutTypeForGame(_squaresSelectedGame.value)
+        val fresh = createInitialSquaresBoard(gameId, currentVer, defaultPayout).copy(
+            pricePerSquare = _squaresBoard.value.pricePerSquare
+        )
+        _squaresBoard.value = fresh
+        squaresStorage.saveBoard(fresh)
     }
 
     fun toggleSquareSelection(row: Int, col: Int) {
+        // Maintained for backward compatibility
         if (row !in 0..9 || col !in 0..9) return
         val currentCells = _squaresBoard.value.cells.toMutableList()
         val index = row * 10 + col
@@ -796,7 +1020,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
             cell.copy(isUserSquare = true, ownerName = "Me")
         }
         currentCells[index] = updatedCell
-        _squaresBoard.value = _squaresBoard.value.copy(cells = currentCells)
+        val updatedBoard = _squaresBoard.value.copy(cells = currentCells)
+        _squaresBoard.value = updatedBoard
+        squaresStorage.saveBoard(updatedBoard)
     }
 
     fun openPaymentQr(method: String) {
@@ -817,7 +1043,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         } catch (e: Throwable) {}
     }
 
-    private fun createInitialSquaresBoard(gameId: String): SquaresBoard {
+    private fun createInitialSquaresBoard(gameId: String, version: Int = 1, payoutType: String = "QUARTERS"): SquaresBoard {
         val homeNumbers = (0..9).shuffled()
         val awayNumbers = (0..9).shuffled()
         val cells = (0 until 100).map { i ->
@@ -825,16 +1051,22 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
                 index = i,
                 row = i / 10,
                 col = i % 10,
-                ownerName = if (i % 7 == 0) "Player ${i % 5 + 1}" else "",
+                ownerName = "",
                 isUserSquare = false
             )
         }
         return SquaresBoard(
             gameId = gameId,
+            boardVersion = version,
             pricePerSquare = 10,
+            payoutType = payoutType,
+            isNumbersLocked = false,
+            isBoardLocked = false,
             homeNumbers = homeNumbers,
             awayNumbers = awayNumbers,
-            cells = cells
+            cells = cells,
+            pendingEntries = emptyList(),
+            sales = emptyList()
         )
     }
 

@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.api.ChannelMatchingHelper
+import com.example.model.ApTeamRank
 import com.example.model.Channel
 import com.example.model.Game
 import com.example.model.NcaaFootballData
@@ -48,6 +49,7 @@ fun HomeScreen(
     hotThisWeekGames: List<Game> = emptyList(),
     channels: List<Channel>,
     ncaaFootballData: NcaaFootballData,
+    ncaaWomensRankings: List<ApTeamRank> = emptyList(),
     currentPlayingChannel: Channel?,
     isOffline: Boolean,
     lastUpdatedTime: String,
@@ -354,6 +356,30 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(ncaaFootballData.apTop20) { rankItem ->
+                        ApTop20Card(
+                            rankItem = rankItem,
+                            onClick = { onSelectNcaaTeam(rankItem.displayName) }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+
+        // 4b. AP Top 20 Women's Basketball Row
+        if (ncaaWomensRankings.isNotEmpty()) {
+            item {
+                Text(
+                    text = "AP Top 20 Women's Basketball",
+                    color = TvTextPrimary,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(ncaaWomensRankings) { rankItem ->
                         ApTop20Card(
                             rankItem = rankItem,
                             onClick = { onSelectNcaaTeam(rankItem.displayName) }

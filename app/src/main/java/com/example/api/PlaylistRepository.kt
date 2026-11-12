@@ -27,7 +27,8 @@ class PlaylistRepository(
         "sport", "espn", "fox sports", "nfl", "nba", "nhl", "mlb",
         "nbc sports", "cbs sports", "bein", "sky sports", "tnt", "dazn",
         "fight", "ufc", "golf", "tennis", "racing", "soccer", "football",
-        "boxing", "motorsport", "f1", "nascar", "hockey", "baseball", "basketball"
+        "boxing", "motorsport", "f1", "nascar", "hockey", "baseball", "basketball",
+        "ncaaw", "wbb", "women's basketball", "women's college basketball", "espn w", "espnw"
     )
 
     fun loadConfig(): PlaylistConfig {
