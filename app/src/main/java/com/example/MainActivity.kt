@@ -78,9 +78,10 @@ class MainActivity : ComponentActivity() {
             prevHandler?.uncaughtException(thread, throwable) ?: kotlin.system.exitProcess(1)
         }
 
-        enableEdgeToEdge()
+        try {
+            enableEdgeToEdge()
 
-        setContent {
+            setContent {
             MyApplicationTheme {
                 val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
                 val games by viewModel.games.collectAsStateWithLifecycle()
@@ -100,6 +101,7 @@ class MainActivity : ComponentActivity() {
                 val squaresSelectedGame by viewModel.squaresSelectedGame.collectAsStateWithLifecycle()
                 val squaresBoard by viewModel.squaresBoard.collectAsStateWithLifecycle()
                 val squaresBoardVersions by viewModel.squaresBoardVersions.collectAsStateWithLifecycle()
+                val isSquaresLoading by viewModel.isSquaresLoading.collectAsStateWithLifecycle()
                 val showSquaresQrDialog by viewModel.showSquaresQrDialog.collectAsStateWithLifecycle()
                 val squaresPaymentMethod by viewModel.squaresPaymentMethod.collectAsStateWithLifecycle()
 
@@ -227,6 +229,7 @@ class MainActivity : ComponentActivity() {
                                         selectedGame = squaresSelectedGame,
                                         squaresBoard = squaresBoard,
                                         boardVersions = squaresBoardVersions,
+                                        isLoading = isSquaresLoading,
                                         showPaymentDialog = showSquaresQrDialog,
                                         paymentMethod = squaresPaymentMethod,
                                         onSelectGame = { viewModel.selectGameForSquares(it) },
@@ -349,6 +352,16 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    } catch (t: Throwable) {
+            try {
+                val crashFile = File(filesDir, "last_crash.txt")
+                val sw = StringWriter()
+                val pw = PrintWriter(sw)
+                t.printStackTrace(pw)
+                crashFile.writeText("Crash Time: ${Date()}\nThread: ${Thread.currentThread().name}\nLocation: MainActivity.onCreate\n\n${sw}")
+            } catch (_: Throwable) {}
+            throw t
         }
     }
 

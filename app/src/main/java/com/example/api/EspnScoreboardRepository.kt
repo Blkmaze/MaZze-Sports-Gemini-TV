@@ -22,6 +22,7 @@ class EspnScoreboardRepository(
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(10, TimeUnit.SECONDS)
         .build()
 ) {
     data class LeagueTarget(val sport: String, val league: String, val displayName: String)
@@ -133,7 +134,8 @@ class EspnScoreboardRepository(
         try {
             val root = JSONObject(jsonString)
             val events = root.optJSONArray("events") ?: return games
-            for (i in 0 until events.length()) {
+            val maxEvents = minOf(events.length(), 150)
+            for (i in 0 until maxEvents) {
                 val event = events.optJSONObject(i) ?: continue
                 val id = event.optString("id", "")
                 val name = event.optString("name", "")
@@ -263,7 +265,8 @@ class EspnScoreboardRepository(
                             val poll = rankingsArr.optJSONObject(0)
                             val ranks = poll?.optJSONArray("ranks")
                             if (ranks != null) {
-                                for (i in 0 until ranks.length()) {
+                                val maxRanks = minOf(ranks.length(), 25)
+                                for (i in 0 until maxRanks) {
                                     val rObj = ranks.optJSONObject(i) ?: continue
                                     val currentRank = rObj.optInt("current", i + 1)
                                     val teamObj = rObj.optJSONObject("team") ?: continue
@@ -312,7 +315,8 @@ class EspnScoreboardRepository(
                         val root = JSONObject(body)
                         val events = root.optJSONArray("events")
                         if (events != null) {
-                            for (i in 0 until events.length()) {
+                            val maxEvents = minOf(events.length(), 150)
+                            for (i in 0 until maxEvents) {
                                 val event = events.optJSONObject(i) ?: continue
                                 val id = event.optString("id", "")
                                 val name = event.optString("name", "")
@@ -447,7 +451,8 @@ class EspnScoreboardRepository(
                         val poll = rankingsArr.optJSONObject(0)
                         val ranks = poll?.optJSONArray("ranks")
                         if (ranks != null) {
-                            for (i in 0 until ranks.length()) {
+                            val maxRanks = minOf(ranks.length(), 25)
+                            for (i in 0 until maxRanks) {
                                 val rObj = ranks.optJSONObject(i) ?: continue
                                 val currentRank = rObj.optInt("current", i + 1)
                                 val record = rObj.optString("recordSummary", "").ifBlank {

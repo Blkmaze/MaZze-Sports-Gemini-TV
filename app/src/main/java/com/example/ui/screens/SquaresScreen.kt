@@ -59,6 +59,7 @@ fun SquaresScreen(
     selectedGame: Game?,
     squaresBoard: SquaresBoard,
     boardVersions: List<Int> = listOf(1),
+    isLoading: Boolean = false,
     showPaymentDialog: Boolean,
     paymentMethod: String,
     onSelectGame: (Game) -> Unit = {},
@@ -83,8 +84,33 @@ fun SquaresScreen(
     onResetBoard: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    if (isLoading && squaresBoard.cells.isEmpty()) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(TvDarkBackground),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(
+                    color = TvOrangeFocus,
+                    modifier = Modifier.size(40.dp),
+                    strokeWidth = 3.dp
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "Loading Squares Pool Board...",
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+        return
+    }
+
     val context = LocalContext.current
-    val adminManager = remember { SquaresAdminManager(context) }
+    val adminManager = remember { SquaresAdminManager(context.applicationContext) }
 
     // Standard ParlayPro price options:
     // $5, $10, $15, $20, $25, $30, $40, $50, $75, $100, $150, $200, Custom
@@ -117,13 +143,16 @@ fun SquaresScreen(
     // Focused cell for inspector
     var focusedCellIndex by remember { mutableStateOf<Int?>(null) }
 
-    // Auto-lock and lockout ticker
+    // Auto-lock and lockout ticker (only ticks when unlocked or locked out to prevent useless recomposition)
     LaunchedEffect(Unit) {
         while (true) {
-            val remainingSec = adminManager.getRemainingSessionSeconds()
-            sessionRemainingSeconds = remainingSec
-            isAdminUnlocked = adminManager.isSessionUnlocked()
-            lockoutRemaining = adminManager.getRemainingLockoutSeconds()
+            val isUnlocked = adminManager.isSessionUnlocked()
+            val remLock = adminManager.getRemainingLockoutSeconds()
+            if (isUnlocked || isAdminUnlocked || remLock > 0 || lockoutRemaining > 0) {
+                sessionRemainingSeconds = adminManager.getRemainingSessionSeconds()
+                isAdminUnlocked = isUnlocked
+                lockoutRemaining = remLock
+            }
             delay(1000L)
         }
     }

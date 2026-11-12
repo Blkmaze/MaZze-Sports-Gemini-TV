@@ -324,7 +324,10 @@ fun HomeScreen(
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(hotThisWeekGames) { game ->
+                    items(
+                        items = hotThisWeekGames,
+                        key = { it.id.ifBlank { "${it.league}-${it.homeTeam.displayName}-${it.awayTeam.displayName}-${it.startTime}" } }
+                    ) { game ->
                         HotGameCard(
                             game = game,
                             onClick = {
@@ -355,7 +358,10 @@ fun HomeScreen(
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(ncaaFootballData.apTop20) { rankItem ->
+                    items(
+                        items = ncaaFootballData.apTop20,
+                        key = { "cfb-${it.rank}-${it.teamId.ifBlank { it.displayName }}" }
+                    ) { rankItem ->
                         ApTop20Card(
                             rankItem = rankItem,
                             onClick = { onSelectNcaaTeam(rankItem.displayName) }
@@ -379,7 +385,10 @@ fun HomeScreen(
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(ncaaWomensRankings) { rankItem ->
+                    items(
+                        items = ncaaWomensRankings,
+                        key = { "ncaaw-${it.rank}-${it.teamId.ifBlank { it.displayName }}" }
+                    ) { rankItem ->
                         ApTop20Card(
                             rankItem = rankItem,
                             onClick = { onSelectNcaaTeam(rankItem.displayName) }
@@ -418,7 +427,10 @@ fun HomeScreen(
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(games) { game ->
+                    items(
+                        items = games,
+                        key = { it.id.ifBlank { "${it.league}-${it.homeTeam.displayName}-${it.awayTeam.displayName}" } }
+                    ) { game ->
                         GameScoreCard(
                             game = game,
                             spoilerFree = spoilerFree,
@@ -450,7 +462,10 @@ fun HomeScreen(
                 )
                 Spacer(modifier = Modifier.height(10.dp))
             }
-            items(ncaaFootballData.games.take(15)) { ncaaGame ->
+            items(
+                items = ncaaFootballData.games.take(15),
+                key = { "ncaa-game-${it.id}" }
+            ) { ncaaGame ->
                 NcaaGameRow(
                     game = ncaaGame,
                     onClick = {

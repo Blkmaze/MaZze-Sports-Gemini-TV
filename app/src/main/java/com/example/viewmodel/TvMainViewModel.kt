@@ -27,7 +27,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     private val espnRepo = EspnScoreboardRepository()
     private val playlistRepo = PlaylistRepository(application)
     private val updaterRepo = UpdaterRepository(application)
-    private val squaresStorage = com.example.util.SquaresStorage(application)
+    private val squaresStorage by lazy { com.example.util.SquaresStorage(application) }
 
     private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
         // Safe swallow: prevent unhandled coroutine failure from killing the app process
@@ -86,13 +86,17 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     private val _squaresBoardVersions = MutableStateFlow<List<Int>>(listOf(1))
     val squaresBoardVersions: StateFlow<List<Int>> = _squaresBoardVersions.asStateFlow()
 
+    private val _isSquaresLoading = MutableStateFlow(false)
+    val isSquaresLoading: StateFlow<Boolean> = _isSquaresLoading.asStateFlow()
+    private var isSquaresInitialized = false
+
     private val _showSquaresQrDialog = MutableStateFlow(false)
     val showSquaresQrDialog: StateFlow<Boolean> = _showSquaresQrDialog.asStateFlow()
 
     private val _squaresPaymentMethod = MutableStateFlow("Cash App")
     val squaresPaymentMethod: StateFlow<String> = _squaresPaymentMethod.asStateFlow()
 
-    private val _playlistConfig = MutableStateFlow(playlistRepo.loadConfig())
+    private val _playlistConfig = MutableStateFlow(PlaylistConfig())
     val playlistConfig: StateFlow<PlaylistConfig> = _playlistConfig.asStateFlow()
 
     private val _updateInfo = MutableStateFlow(UpdateInfo())
@@ -121,33 +125,69 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         try {
-            _spoilerFree.value = _playlistConfig.value.spoilerFree
-        } catch (e: Throwable) {}
+            loadConfigAsync()
+            loadCrashReport()
+            loadChannels()
+            startScoreboardPolling()
 
-        loadCrashReport()
-        loadChannels()
-        startScoreboardPolling()
-        startNcaaPolling()
-        startWeekScoreboardPolling()
+            // STAGED DATA LOAD: Delay ~2s before fetching AP Top 20 & NCAAW sequentially on Dispatchers.IO
+            viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+                delay(2000L)
+                fetchNcaaFootball()
+                fetchWomensBasketball()
+                startNcaaPolling()
+
+                // Delay 8 additional seconds before starting heavy multi-league week schedule queries
+                delay(8000L)
+                startWeekScoreboardPolling()
+            }
+        } catch (t: Throwable) {
+            recordInitError(t)
+        }
+    }
+
+    private fun recordInitError(t: Throwable) {
+        try {
+            val crashFile = java.io.File(getApplication<Application>().filesDir, "last_crash.txt")
+            val sw = java.io.StringWriter()
+            val pw = java.io.PrintWriter(sw)
+            t.printStackTrace(pw)
+            crashFile.writeText("Crash Time: ${Date()}\nLocation: TvMainViewModel.init\n\n$sw")
+            _lastCrashReport.value = crashFile.readText()
+        } catch (_: Throwable) {}
+    }
+
+    private fun loadConfigAsync() {
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            try {
+                val cfg = playlistRepo.loadConfig()
+                _playlistConfig.value = cfg
+                _spoilerFree.value = cfg.spoilerFree
+            } catch (e: Throwable) {
+                // Keep default
+            }
+        }
     }
 
     fun loadCrashReport() {
-        try {
-            val crashFile = java.io.File(getApplication<Application>().filesDir, "last_crash.txt")
-            _lastCrashReport.value = if (crashFile.exists()) crashFile.readText() else null
-        } catch (e: Throwable) {
-            _lastCrashReport.value = null
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            try {
+                val crashFile = java.io.File(getApplication<Application>().filesDir, "last_crash.txt")
+                _lastCrashReport.value = if (crashFile.exists()) crashFile.readText() else null
+            } catch (e: Throwable) {
+                _lastCrashReport.value = null
+            }
         }
     }
 
     fun clearCrashReport() {
-        try {
-            val crashFile = java.io.File(getApplication<Application>().filesDir, "last_crash.txt")
-            if (crashFile.exists()) {
-                crashFile.delete()
-            }
-            _lastCrashReport.value = null
-        } catch (e: Throwable) {
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            try {
+                val crashFile = java.io.File(getApplication<Application>().filesDir, "last_crash.txt")
+                if (crashFile.exists()) {
+                    crashFile.delete()
+                }
+            } catch (e: Throwable) {}
             _lastCrashReport.value = null
         }
     }
@@ -155,6 +195,34 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     fun setScreen(screenIndex: Int) {
         _currentScreen.value = screenIndex
         _isFullScreenPlayer.value = false
+        if (screenIndex == 3) {
+            ensureSquaresLoaded()
+        }
+    }
+
+    fun ensureSquaresLoaded() {
+        if (isSquaresInitialized) return
+        isSquaresInitialized = true
+        _isSquaresLoading.value = true
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            try {
+                val targetGame = _squaresSelectedGame.value ?: _games.value.firstOrNull()
+                val gid = targetGame?.id ?: ""
+                val activeVer = squaresStorage.getActiveVersion(gid)
+                val existing = squaresStorage.loadBoard(gid, activeVer)
+                val defaultPayout = getDefaultPayoutTypeForGame(targetGame)
+                val board = existing ?: createInitialSquaresBoard(gid, activeVer, defaultPayout).also {
+                    squaresStorage.saveBoard(it)
+                }
+                val versions = squaresStorage.getBoardVersions(gid)
+                _squaresSelectedGame.value = targetGame
+                _squaresBoard.value = board
+                _squaresBoardVersions.value = versions
+            } catch (_: Throwable) {
+            } finally {
+                _isSquaresLoading.value = false
+            }
+        }
     }
 
     fun setChannelSearchFilter(query: String) {
@@ -185,19 +253,23 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleSpoilerFreeMode() {
-        val newVal = playlistRepo.toggleSpoilerFree(_spoilerFree.value)
-        _spoilerFree.value = newVal
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            val newVal = playlistRepo.toggleSpoilerFree(_spoilerFree.value)
+            _spoilerFree.value = newVal
+        }
     }
 
     fun toggleFavorite(channelId: String) {
-        val isFav = playlistRepo.toggleFavorite(channelId)
-        _channels.value = _channels.value.map {
-            if (it.id == channelId) it.copy(isFavorite = isFav) else it
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            val isFav = playlistRepo.toggleFavorite(channelId)
+            _channels.value = _channels.value.map {
+                if (it.id == channelId) it.copy(isFavorite = isFav) else it
+            }
         }
     }
 
     fun loadChannels() {
-        viewModelScope.launch(exceptionHandler) {
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
             try {
                 val list = playlistRepo.loadChannels()
                 _channels.value = list
@@ -212,9 +284,11 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun updatePlaylistConfig(config: PlaylistConfig) {
-        playlistRepo.saveConfig(config)
-        _playlistConfig.value = config
-        loadChannels()
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            playlistRepo.saveConfig(config)
+            _playlistConfig.value = config
+            loadChannels()
+        }
     }
 
     fun loadDemoChannels() {
@@ -815,17 +889,27 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectGameForSquares(game: Game) {
         _squaresSelectedGame.value = game
-        val activeVer = squaresStorage.getActiveVersion(game.id)
-        val existing = squaresStorage.loadBoard(game.id, activeVer)
-        val defaultPayout = getDefaultPayoutTypeForGame(game)
-        if (existing != null) {
-            _squaresBoard.value = existing
-        } else {
-            val fresh = createInitialSquaresBoard(game.id, activeVer, defaultPayout)
-            _squaresBoard.value = fresh
-            squaresStorage.saveBoard(fresh)
+        _isSquaresLoading.value = true
+        isSquaresInitialized = true
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            try {
+                val activeVer = squaresStorage.getActiveVersion(game.id)
+                val existing = squaresStorage.loadBoard(game.id, activeVer)
+                val defaultPayout = getDefaultPayoutTypeForGame(game)
+                val board = if (existing != null) {
+                    existing
+                } else {
+                    val fresh = createInitialSquaresBoard(game.id, activeVer, defaultPayout)
+                    squaresStorage.saveBoard(fresh)
+                    fresh
+                }
+                val versions = squaresStorage.getBoardVersions(game.id)
+                _squaresBoard.value = board
+                _squaresBoardVersions.value = versions
+            } finally {
+                _isSquaresLoading.value = false
+            }
         }
-        _squaresBoardVersions.value = squaresStorage.getBoardVersions(game.id)
     }
 
     fun setSquaresPrice(price: Int) {
@@ -833,7 +917,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         if (board.sales.isNotEmpty() || board.pendingEntries.isNotEmpty()) return
         val updated = board.copy(pricePerSquare = price)
         _squaresBoard.value = updated
-        squaresStorage.saveBoard(updated)
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            squaresStorage.saveBoard(updated)
+        }
     }
 
     fun setSquaresPayoutType(type: String) {
@@ -841,7 +927,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         if (board.sales.isNotEmpty() || board.pendingEntries.isNotEmpty()) return
         val updated = board.copy(payoutType = type)
         _squaresBoard.value = updated
-        squaresStorage.saveBoard(updated)
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            squaresStorage.saveBoard(updated)
+        }
     }
 
     fun submitPendingEntry(initials: String, count: Int, paymentMethod: String): Boolean {
@@ -864,7 +952,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         )
         val updatedBoard = board.copy(pendingEntries = board.pendingEntries + entry)
         _squaresBoard.value = updatedBoard
-        squaresStorage.saveBoard(updatedBoard)
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            squaresStorage.saveBoard(updatedBoard)
+        }
         return true
     }
 
@@ -902,7 +992,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
             sales = listOf(sale) + board.sales
         )
         _squaresBoard.value = updatedBoard
-        squaresStorage.saveBoard(updatedBoard)
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            squaresStorage.saveBoard(updatedBoard)
+        }
         return chosenCells.map { it.index }
     }
 
@@ -911,21 +1003,27 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         val updatedPending = board.pendingEntries.filter { it.id != entryId }
         val updatedBoard = board.copy(pendingEntries = updatedPending)
         _squaresBoard.value = updatedBoard
-        squaresStorage.saveBoard(updatedBoard)
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            squaresStorage.saveBoard(updatedBoard)
+        }
     }
 
     fun releaseAllPending() {
         val board = _squaresBoard.value
         val updatedBoard = board.copy(pendingEntries = emptyList())
         _squaresBoard.value = updatedBoard
-        squaresStorage.saveBoard(updatedBoard)
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            squaresStorage.saveBoard(updatedBoard)
+        }
     }
 
     fun toggleLockBoard() {
         val board = _squaresBoard.value
         val updatedBoard = board.copy(isBoardLocked = !board.isBoardLocked)
         _squaresBoard.value = updatedBoard
-        squaresStorage.saveBoard(updatedBoard)
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            squaresStorage.saveBoard(updatedBoard)
+        }
     }
 
     fun lockNumbers() {
@@ -937,28 +1035,35 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
             awayNumbers = (0..9).shuffled()
         )
         _squaresBoard.value = updatedBoard
-        squaresStorage.saveBoard(updatedBoard)
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            squaresStorage.saveBoard(updatedBoard)
+        }
     }
 
     fun createNextBoardVersion() {
         val gameId = _squaresSelectedGame.value?.id ?: _squaresBoard.value.gameId
-        val versions = squaresStorage.getBoardVersions(gameId)
-        val nextVer = (versions.maxOrNull() ?: 1) + 1
-        val defaultPayout = _squaresBoard.value.payoutType
-        val fresh = createInitialSquaresBoard(gameId, nextVer, defaultPayout).copy(
-            pricePerSquare = _squaresBoard.value.pricePerSquare
-        )
-        squaresStorage.saveBoard(fresh)
-        squaresStorage.setActiveVersion(gameId, nextVer)
-        _squaresBoard.value = fresh
-        _squaresBoardVersions.value = squaresStorage.getBoardVersions(gameId)
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            val versions = squaresStorage.getBoardVersions(gameId)
+            val nextVer = (versions.maxOrNull() ?: 1) + 1
+            val defaultPayout = _squaresBoard.value.payoutType
+            val fresh = createInitialSquaresBoard(gameId, nextVer, defaultPayout).copy(
+                pricePerSquare = _squaresBoard.value.pricePerSquare
+            )
+            squaresStorage.saveBoard(fresh)
+            squaresStorage.setActiveVersion(gameId, nextVer)
+            val updatedVersions = squaresStorage.getBoardVersions(gameId)
+            _squaresBoard.value = fresh
+            _squaresBoardVersions.value = updatedVersions
+        }
     }
 
     fun switchBoardVersion(version: Int) {
         val gameId = _squaresSelectedGame.value?.id ?: _squaresBoard.value.gameId
-        val loaded = squaresStorage.loadBoard(gameId, version) ?: return
-        squaresStorage.setActiveVersion(gameId, version)
-        _squaresBoard.value = loaded
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            val loaded = squaresStorage.loadBoard(gameId, version) ?: return@launch
+            squaresStorage.setActiveVersion(gameId, version)
+            _squaresBoard.value = loaded
+        }
     }
 
     fun sellSquares(initials: String, count: Int, paymentMethod: String): List<Int> {
@@ -992,7 +1097,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
             sales = listOf(sale) + board.sales
         )
         _squaresBoard.value = updatedBoard
-        squaresStorage.saveBoard(updatedBoard)
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            squaresStorage.saveBoard(updatedBoard)
+        }
         return chosenCells.map { it.index }
     }
 
@@ -1004,7 +1111,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
             pricePerSquare = _squaresBoard.value.pricePerSquare
         )
         _squaresBoard.value = fresh
-        squaresStorage.saveBoard(fresh)
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            squaresStorage.saveBoard(fresh)
+        }
     }
 
     fun toggleSquareSelection(row: Int, col: Int) {
@@ -1022,7 +1131,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         currentCells[index] = updatedCell
         val updatedBoard = _squaresBoard.value.copy(cells = currentCells)
         _squaresBoard.value = updatedBoard
-        squaresStorage.saveBoard(updatedBoard)
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            squaresStorage.saveBoard(updatedBoard)
+        }
     }
 
     fun openPaymentQr(method: String) {
