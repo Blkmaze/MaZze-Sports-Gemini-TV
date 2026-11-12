@@ -111,11 +111,17 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
     private val _channelSearchFilter = MutableStateFlow("")
     val channelSearchFilter: StateFlow<String> = _channelSearchFilter.asStateFlow()
 
+    private val _channelCategoryFilter = MutableStateFlow("All")
+    val channelCategoryFilter: StateFlow<String> = _channelCategoryFilter.asStateFlow()
+
     private val _lastCrashReport = MutableStateFlow<String?>(null)
     val lastCrashReport: StateFlow<String?> = _lastCrashReport.asStateFlow()
 
     private val _hotThisWeekGames = MutableStateFlow<List<Game>>(emptyList())
     val hotThisWeekGames: StateFlow<List<Game>> = _hotThisWeekGames.asStateFlow()
+
+    private val _weekGames = MutableStateFlow<List<Game>>(emptyList())
+    val weekGames: StateFlow<List<Game>> = _weekGames.asStateFlow()
 
     private var pollJob: Job? = null
     private var ncaaPollJob: Job? = null
@@ -229,8 +235,15 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         _channelSearchFilter.value = query
     }
 
-    fun openChannelsWithFilter(query: String) {
+    fun openChannelsWithFilter(query: String, category: String = "All") {
         _channelSearchFilter.value = query
+        _channelCategoryFilter.value = category
+        setScreen(2) // Navigate to Channels
+    }
+
+    fun openChannelsClean() {
+        _channelSearchFilter.value = ""
+        _channelCategoryFilter.value = "All"
         setScreen(2) // Navigate to Channels
     }
 
@@ -478,6 +491,7 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
             val result = espnRepo.fetchWeekScoreboards()
             result.onSuccess { games ->
                 cachedWeekGames = games
+                _weekGames.value = games
                 recomputeHotGames()
             }
         } catch (e: Throwable) {

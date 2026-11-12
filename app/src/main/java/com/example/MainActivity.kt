@@ -109,7 +109,9 @@ class MainActivity : ComponentActivity() {
                 val updateInfo by viewModel.updateInfo.collectAsStateWithLifecycle()
                 val ncaaFootballData by viewModel.ncaaFootballData.collectAsStateWithLifecycle()
                 val ncaaWomensRankings by viewModel.ncaaWomensRankings.collectAsStateWithLifecycle()
+                val weekGames by viewModel.weekGames.collectAsStateWithLifecycle()
                 val channelSearchFilter by viewModel.channelSearchFilter.collectAsStateWithLifecycle()
+                val channelCategoryFilter by viewModel.channelCategoryFilter.collectAsStateWithLifecycle()
                 val lastCrashReport by viewModel.lastCrashReport.collectAsStateWithLifecycle()
                 var showStartupCrashDialog by remember(lastCrashReport) {
                     mutableStateOf(!lastCrashReport.isNullOrBlank())
@@ -151,7 +153,13 @@ class MainActivity : ComponentActivity() {
                             // Left TV Navigation Rail
                             TvNavigationRail(
                                 selectedScreen = currentScreen,
-                                onScreenSelected = { viewModel.setScreen(it) }
+                                onScreenSelected = { screen ->
+                                    if (screen == 2 && currentScreen != 2) {
+                                        viewModel.openChannelsClean()
+                                    } else {
+                                        viewModel.setScreen(screen)
+                                    }
+                                }
                             )
 
                             // Main Content Area
@@ -161,6 +169,7 @@ class MainActivity : ComponentActivity() {
                                     0 -> HomeScreen(
                                         games = games,
                                         hotThisWeekGames = hotThisWeekGames,
+                                        weekGames = weekGames,
                                         channels = channels,
                                         ncaaFootballData = ncaaFootballData,
                                         ncaaWomensRankings = ncaaWomensRankings,
@@ -190,7 +199,11 @@ class MainActivity : ComponentActivity() {
                                             viewModel.setFullScreenPlayer(true)
                                         },
                                         onFindChannel = { query ->
-                                            viewModel.openChannelsWithFilter(query)
+                                            when (query) {
+                                                "NCAAW", "NCAA" -> viewModel.openChannelsWithFilter(query = "", category = query)
+                                                "" -> viewModel.openChannelsClean()
+                                                else -> viewModel.openChannelsWithFilter(query = query, category = "All")
+                                            }
                                         },
                                         isHeroPlayerActive = (currentScreen == 0 && !isFullScreen)
                                     )
@@ -214,7 +227,8 @@ class MainActivity : ComponentActivity() {
                                         channels = channels,
                                         selectedChannel = currentPlayingChannel,
                                         searchQuery = channelSearchFilter,
-                                        onClearSearch = { viewModel.setChannelSearchFilter("") },
+                                        categoryFilter = channelCategoryFilter,
+                                        onClearSearch = { viewModel.openChannelsClean() },
                                         onChannelSelected = { viewModel.setPlayingChannel(it) },
                                         onToggleFavorite = { viewModel.toggleFavorite(it) },
                                         onExpandFullScreen = { ch ->

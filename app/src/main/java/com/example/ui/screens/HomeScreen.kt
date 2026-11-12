@@ -43,10 +43,17 @@ data class GameActionMenuData(
     val network: String
 )
 
+data class TeamNoGameDialogData(
+    val team: ApTeamRank,
+    val isWomens: Boolean,
+    val matchedGame: Game?
+)
+
 @Composable
 fun HomeScreen(
     games: List<Game>,
     hotThisWeekGames: List<Game> = emptyList(),
+    weekGames: List<Game> = emptyList(),
     channels: List<Channel>,
     ncaaFootballData: NcaaFootballData,
     ncaaWomensRankings: List<ApTeamRank> = emptyList(),
@@ -71,6 +78,42 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     var selectedGameActionMenu by remember { mutableStateOf<GameActionMenuData?>(null) }
+    var teamNoGameDialog by remember { mutableStateOf<TeamNoGameDialogData?>(null) }
+
+    fun handleTeamCardClick(team: ApTeamRank, isWomens: Boolean) {
+        val pool = (games + hotThisWeekGames + weekGames).distinctBy {
+            it.id.ifBlank { "${it.league}-${it.homeTeam.displayName}-${it.awayTeam.displayName}-${it.startTime}" }
+        }
+        val matchedGame = ChannelMatchingHelper.findGameForTeam(
+            team = team,
+            isWomens = isWomens,
+            allGames = pool,
+            ncaaGames = ncaaFootballData.games
+        )
+
+        if (matchedGame != null) {
+            val candidates = ChannelMatchingHelper.findCandidatesForGame(matchedGame, channels)
+            if (candidates.isNotEmpty()) {
+                selectedGameActionMenu = GameActionMenuData(
+                    title = "${matchedGame.awayTeam.displayName} @ ${matchedGame.homeTeam.displayName}",
+                    candidates = candidates,
+                    network = matchedGame.network
+                )
+            } else {
+                teamNoGameDialog = TeamNoGameDialogData(
+                    team = team,
+                    isWomens = isWomens,
+                    matchedGame = matchedGame
+                )
+            }
+        } else {
+            teamNoGameDialog = TeamNoGameDialogData(
+                team = team,
+                isWomens = isWomens,
+                matchedGame = null
+            )
+        }
+    }
     val appVersionLabel = remember {
         try {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
@@ -364,7 +407,7 @@ fun HomeScreen(
                     ) { rankItem ->
                         ApTop20Card(
                             rankItem = rankItem,
-                            onClick = { onSelectNcaaTeam(rankItem.displayName) }
+                            onClick = { handleTeamCardClick(rankItem, isWomens = false) }
                         )
                     }
                 }
@@ -391,7 +434,7 @@ fun HomeScreen(
                     ) { rankItem ->
                         ApTop20Card(
                             rankItem = rankItem,
-                            onClick = { onSelectNcaaTeam(rankItem.displayName) }
+                            onClick = { handleTeamCardClick(rankItem, isWomens = true) }
                         )
                     }
                 }
@@ -549,11 +592,116 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(10.dp))
+                    } else {
+                        TvFocusButton(
+                            text = "Search Channels for Matchup",
+                            icon = Icons.Default.Search,
+                            onClick = {
+                                selectedGameActionMenu = null
+                                onFindChannel(menuData.title)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
                     }
 
                     TvFocusButton(
                         text = "Close",
                         onClick = { selectedGameActionMenu = null },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+    }
+
+    // Team No Game / No Channel Dialog (Never a dead end)
+    teamNoGameDialog?.let { noGameData ->
+        Dialog(onDismissRequest = { teamNoGameDialog = null }) {
+            Box(
+                modifier = Modifier
+                    .width(480.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(TvDarkSurface)
+                    .padding(24.dp)
+            ) {
+                Column {
+                    val headerTitle = if (noGameData.matchedGame != null) {
+                        "No Broadcast Channel Found for ${noGameData.team.displayName}"
+                    } else {
+                        "No live game found for ${noGameData.team.displayName} right now"
+                    }
+
+                    Text(
+                        text = headerTitle,
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (noGameData.matchedGame != null) {
+                        val g = noGameData.matchedGame
+                        Text(
+                            text = "Game: ${g.awayTeam.displayName} @ ${g.homeTeam.displayName}",
+                            color = TvLimeAccent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Broadcast: ${g.network.ifBlank { "TBD / Local" }} • Status: ${g.statusDetail.ifBlank { "Scheduled" }}",
+                            color = TvTextSecondary,
+                            fontSize = 12.sp
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "This game's network is not in your playlist. You can browse college sports feeds or view all sports channels below.",
+                            color = TvTextMuted,
+                            fontSize = 11.sp
+                        )
+                    } else {
+                        Text(
+                            text = "There is no live or scheduled broadcast listed on the current ESPN scoreboard for ${noGameData.team.displayName}.",
+                            color = TvTextSecondary,
+                            fontSize = 13.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    val browseLabel = if (noGameData.isWomens) "Browse NCAAW channels" else "Browse College Sports channels"
+                    val browseCategory = if (noGameData.isWomens) "NCAAW" else "NCAA"
+
+                    TvFocusButton(
+                        text = browseLabel,
+                        icon = Icons.Default.SportsBasketball,
+                        isPrimary = true,
+                        onClick = {
+                            teamNoGameDialog = null
+                            onFindChannel(browseCategory)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    TvFocusButton(
+                        text = "Show all sports channels",
+                        icon = Icons.Default.List,
+                        onClick = {
+                            teamNoGameDialog = null
+                            onFindChannel("")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    TvFocusButton(
+                        text = "Close",
+                        onClick = { teamNoGameDialog = null },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }

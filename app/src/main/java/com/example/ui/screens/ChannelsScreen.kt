@@ -22,16 +22,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.api.ChannelMatchingHelper
 import com.example.model.Channel
 import com.example.ui.components.TvFocusButton
 import com.example.ui.components.TvFocusCard
 import com.example.ui.theme.*
+import java.util.Locale
 
 @Composable
 fun ChannelsScreen(
     channels: List<Channel>,
     selectedChannel: Channel?,
     searchQuery: String = "",
+    categoryFilter: String = "All",
     onClearSearch: () -> Unit = {},
     onChannelSelected: (Channel) -> Unit = {},
     onToggleFavorite: (String) -> Unit = {},
@@ -39,35 +42,99 @@ fun ChannelsScreen(
     onNavigateToSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var selectedFilterChip by remember { mutableStateOf("All") }
+    var selectedFilterChip by remember { mutableStateOf(categoryFilter.ifBlank { "All" }) }
     var localSearchQuery by remember { mutableStateOf(searchQuery) }
 
-    LaunchedEffect(searchQuery) {
-        if (searchQuery.isNotBlank()) {
-            localSearchQuery = searchQuery
-        }
+    LaunchedEffect(searchQuery, categoryFilter) {
+        localSearchQuery = searchQuery
+        selectedFilterChip = if (categoryFilter.isNotBlank()) categoryFilter else "All"
     }
 
-    val filterChips = listOf("All", "Favorites", "ESPN", "NCAA", "Motorsport", "Soccer", "News", "Other")
+    val filterChips = listOf("All", "Favorites", "ESPN", "NCAAW", "NCAA", "Motorsport", "Soccer", "News", "Other")
 
-    val filteredChannels = remember(channels, selectedFilterChip, localSearchQuery) {
+    val isFilterActive = localSearchQuery.isNotBlank() || selectedFilterChip != "All"
+
+    val (filteredChannels, isFilterWidened) = remember(channels, selectedFilterChip, localSearchQuery) {
+        if (!isFilterActive) {
+            return@remember Pair(channels, false)
+        }
+
         var list = channels
-        if (selectedFilterChip == "Favorites") {
-            list = list.filter { it.isFavorite }
-        } else if (selectedFilterChip != "All") {
-            list = list.filter {
-                it.name.contains(selectedFilterChip, ignoreCase = true) ||
-                        it.groupTitle.contains(selectedFilterChip, ignoreCase = true)
+
+        // 1. Category Filter Chip
+        when (selectedFilterChip) {
+            "All" -> { /* no-op */ }
+            "Favorites" -> {
+                list = list.filter { it.isFavorite }
+            }
+            "NCAAW" -> {
+                list = list.filter { ch ->
+                    val name = ch.name.lowercase(Locale.ROOT)
+                    val grp = ch.groupTitle.lowercase(Locale.ROOT)
+                    name.contains("ncaaw") || name.contains("wbb") || name.contains("women") ||
+                            name.contains("espn w") || name.contains("espnw") ||
+                            grp.contains("ncaaw") || grp.contains("women") ||
+                            name.contains("sec network") || name.contains("acc network") ||
+                            name.contains("big ten") || name.contains("btn") ||
+                            name.contains("espnu") || name.contains("espn2") ||
+                            name.contains("cbs sports") || name.contains("fs1") || name.contains("fs2")
+                }
+            }
+            "NCAA" -> {
+                list = list.filter { ch ->
+                    val name = ch.name.lowercase(Locale.ROOT)
+                    val grp = ch.groupTitle.lowercase(Locale.ROOT)
+                    name.contains("ncaa") || name.contains("college") ||
+                            grp.contains("ncaa") || grp.contains("college") ||
+                            name.contains("sec network") || name.contains("acc network") ||
+                            name.contains("big ten") || name.contains("btn") ||
+                            name.contains("espnu") || name.contains("cbs sports")
+                }
+            }
+            "ESPN" -> {
+                list = list.filter { ch ->
+                    val name = ch.name.lowercase(Locale.ROOT)
+                    val grp = ch.groupTitle.lowercase(Locale.ROOT)
+                    name.contains("espn") || grp.contains("espn") ||
+                            name.contains("sec") || name.contains("acc")
+                }
+            }
+            else -> {
+                list = list.filter {
+                    it.name.contains(selectedFilterChip, ignoreCase = true) ||
+                            it.groupTitle.contains(selectedFilterChip, ignoreCase = true)
+                }
             }
         }
 
+        // 2. Search query filter
         if (localSearchQuery.isNotBlank()) {
-            list = list.filter {
-                it.name.contains(localSearchQuery, ignoreCase = true) ||
-                        it.groupTitle.contains(localSearchQuery, ignoreCase = true)
+            val q = localSearchQuery.trim().lowercase(Locale.ROOT)
+            val queryAliases = ChannelMatchingHelper.getAliasesForName(localSearchQuery)
+            val tokens = (listOf(q) + queryAliases + q.split(" ", "-", "/"))
+                .filter { it.length > 2 }
+                .distinct()
+
+            list = list.filter { ch ->
+                val name = ch.name.lowercase(Locale.ROOT)
+                val grp = ch.groupTitle.lowercase(Locale.ROOT)
+
+                if (name.contains(q) || grp.contains(q)) return@filter true
+
+                tokens.any { token ->
+                    name.contains(token) || grp.contains(token)
+                }
             }
         }
-        list
+
+        // 3. Auto-widen an empty filter with a note banner
+        if (list.isEmpty() && channels.isNotEmpty()) {
+            val sportsChannels = channels.filter { it.isSports }
+            val widenedList = if (sportsChannels.isNotEmpty()) sportsChannels else channels
+            Pair(widenedList, true)
+        } else {
+            Pair(list, false)
+        }
     }
 
     Column(
@@ -90,18 +157,24 @@ fun ChannelsScreen(
                     fontWeight = FontWeight.Black
                 )
                 Text(
-                    text = "${filteredChannels.size} channels available",
-                    color = TvTextSecondary,
+                    text = if (isFilterWidened) {
+                        "${filteredChannels.size} sports channels (filter widened)"
+                    } else {
+                        "${filteredChannels.size} channels available"
+                    },
+                    color = if (isFilterWidened) TvOrangeFocus else TvTextSecondary,
                     fontSize = 12.sp
                 )
             }
 
-            if (localSearchQuery.isNotBlank()) {
+            if (localSearchQuery.isNotBlank() || selectedFilterChip != "All") {
+                val filterDesc = if (localSearchQuery.isNotBlank()) "'$localSearchQuery'" else selectedFilterChip
                 TvFocusButton(
-                    text = "Clear Filter: '$localSearchQuery'",
+                    text = "Clear Filter: $filterDesc",
                     icon = Icons.Default.Close,
                     onClick = {
                         localSearchQuery = ""
+                        selectedFilterChip = "All"
                         onClearSearch()
                     }
                 )
@@ -146,7 +219,51 @@ fun ChannelsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Note banner when filter was automatically widened
+        if (isFilterWidened) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF2E2415))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = TvOrangeFocus,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "No channels matched '${localSearchQuery.ifBlank { selectedFilterChip }}' · Filter widened to all sports channels",
+                        color = Color(0xFFFFD59E),
+                        fontSize = 13.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                TvFocusButton(
+                    text = "Clear Filter",
+                    icon = Icons.Default.Close,
+                    onClick = {
+                        localSearchQuery = ""
+                        selectedFilterChip = "All"
+                        onClearSearch()
+                    }
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         // Channels List
         if (filteredChannels.isEmpty()) {
@@ -165,7 +282,7 @@ fun ChannelsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "No channels match the filter",
+                        text = "No channels available in playlist",
                         color = TvTextSecondary,
                         fontSize = 15.sp
                     )
