@@ -113,6 +113,67 @@ data class SquaresBoard(
     val sales: List<SquareSale> = emptyList()
 )
 
+object SquaresConfig {
+    const val ADMIN_FEE_PERCENT: Double = 15.0
+
+    fun calculatePayouts(pricePerSquare: Int, payoutType: String): SquaresPayouts {
+        val totalPotCents = pricePerSquare * 100 * 100L
+        val adminFeeCents = Math.round(totalPotCents * (ADMIN_FEE_PERCENT / 100.0))
+        val prizePoolCents = totalPotCents - adminFeeCents
+        val isHalves = payoutType.equals("HALVES", ignoreCase = true)
+
+        val q1Cents: Long
+        val q2Cents: Long
+        val q3Cents: Long
+        val finalCents: Long
+
+        if (isHalves) {
+            q1Cents = 0L
+            q2Cents = Math.round(prizePoolCents * 0.50)
+            q3Cents = 0L
+            finalCents = prizePoolCents - q2Cents
+        } else {
+            val qBase = Math.round(prizePoolCents * 0.25)
+            q1Cents = qBase
+            q2Cents = qBase
+            q3Cents = qBase
+            finalCents = prizePoolCents - (q1Cents + q2Cents + q3Cents)
+        }
+
+        return SquaresPayouts(
+            pricePerSquare = pricePerSquare,
+            totalPot = totalPotCents / 100.0,
+            adminFee = adminFeeCents / 100.0,
+            prizePool = prizePoolCents / 100.0,
+            q1Payout = q1Cents / 100.0,
+            q2Payout = q2Cents / 100.0,
+            q3Payout = q3Cents / 100.0,
+            finalPayout = finalCents / 100.0,
+            isHalves = isHalves
+        )
+    }
+
+    fun formatMoney(amount: Double): String {
+        return if (amount % 1.0 == 0.0) {
+            String.format(java.util.Locale.US, "$%,d", amount.toLong())
+        } else {
+            String.format(java.util.Locale.US, "$%,.2f", amount)
+        }
+    }
+}
+
+data class SquaresPayouts(
+    val pricePerSquare: Int,
+    val totalPot: Double,
+    val adminFee: Double,
+    val prizePool: Double,
+    val q1Payout: Double,
+    val q2Payout: Double,
+    val q3Payout: Double,
+    val finalPayout: Double,
+    val isHalves: Boolean
+)
+
 data class PlaylistConfig(
     val type: String = "demo",
     val m3uUrl: String = "",

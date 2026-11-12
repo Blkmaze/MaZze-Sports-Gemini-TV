@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.model.Game
 import com.example.model.SquaresBoard
+import com.example.model.SquaresConfig
+import com.example.model.SquaresPayouts
 import com.example.ui.components.TvFocusButton
 import com.example.ui.components.TvFocusCard
 import com.example.ui.theme.*
@@ -166,20 +168,20 @@ fun SquaresScreen(
     // Check if price / board type can be changed (only when NO sales and NO pending entries exist)
     val isSetupLocked = soldCount > 0 || pendingCount > 0
 
-    // Live Pot calculation: price x 100 squares (strictly NO hardcoded $1000!)
-    val totalPot = 100 * squaresBoard.pricePerSquare
-
-    // Payouts calculation based on payoutType:
-    // Quarters (NFL, NBA, NHL, WNBA, MLB default): Q1=25%, Q2/Half=25%, Q3=25%, Final=25%
-    // Halves (College Basketball default): Halftime=50%, Final=50%
-    val isHalves = squaresBoard.payoutType.equals("HALVES", ignoreCase = true)
-    val q1Payout = if (isHalves) 0 else (totalPot * 0.25).toInt()
-    val q2Payout = if (isHalves) (totalPot * 0.50).toInt() else (totalPot * 0.25).toInt()
-    val q3Payout = if (isHalves) 0 else (totalPot * 0.25).toInt()
-    val finalPayout = if (isHalves) (totalPot * 0.50).toInt() else (totalPot * 0.25).toInt()
+    // Live Pot & 15% Admin Fee calculation
+    val payouts = remember(squaresBoard.pricePerSquare, squaresBoard.payoutType) {
+        SquaresConfig.calculatePayouts(squaresBoard.pricePerSquare, squaresBoard.payoutType)
+    }
+    val isHalves = payouts.isHalves
 
     // Sales summary calculations
     val totalCollected = squaresBoard.sales.sumOf { it.totalAmount }
+    val totalCollectedCents = totalCollected * 100L
+    val adminFeeCollectedCents = Math.round(totalCollectedCents * (SquaresConfig.ADMIN_FEE_PERCENT / 100.0))
+    val prizePoolCollectedCents = totalCollectedCents - adminFeeCollectedCents
+    val adminFeeCollected = adminFeeCollectedCents / 100.0
+    val prizePoolCollected = prizePoolCollectedCents / 100.0
+
     val cashSales = squaresBoard.sales.filter { it.paymentMethod.equals("CASH", ignoreCase = true) }
     val cashAppSales = squaresBoard.sales.filter { it.paymentMethod.equals("CASH APP", ignoreCase = true) }
     val paypalSales = squaresBoard.sales.filter { it.paymentMethod.equals("PAYPAL", ignoreCase = true) }
@@ -226,10 +228,10 @@ fun SquaresScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0xFFE53935).copy(alpha = 0.2f))
-                                    .border(1.dp, Color(0xFFE53935), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFFE53935).copy(alpha = 0.2f))
+                                .border(1.dp, Color(0xFFE53935), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = "BOARD LOCKED",
@@ -241,7 +243,7 @@ fun SquaresScreen(
                         }
                     }
                     Text(
-                        text = "ParlayPro Pool · Price $$${squaresBoard.pricePerSquare}/sq · Total Pot $$${totalPot} · ${if (isHalves) "Halves (50/50)" else "Quarters (25% each)"}",
+                        text = "ParlayPro Pool · Price ${SquaresConfig.formatMoney(payouts.pricePerSquare.toDouble())}/sq · Total Pot ${SquaresConfig.formatMoney(payouts.totalPot)} | Operator fee 15% | Prize Pool ${SquaresConfig.formatMoney(payouts.prizePool)} · ${if (isHalves) "Halves (50% each)" else "Quarters (25% each)"}",
                         color = TvTextSecondary,
                         fontSize = 12.sp
                     )
@@ -433,28 +435,35 @@ fun SquaresScreen(
                                 letterSpacing = 1.sp
                             )
                             Text(
-                                text = "$$totalPot",
+                                text = SquaresConfig.formatMoney(payouts.totalPot),
                                 color = TvLimeAccent,
                                 fontSize = 28.sp,
                                 fontWeight = FontWeight.Black
                             )
                             Text(
-                                text = "100 squares × $$${squaresBoard.pricePerSquare} per square",
+                                text = "100 squares × ${SquaresConfig.formatMoney(payouts.pricePerSquare.toDouble())} per square",
                                 color = TvTextSecondary,
                                 fontSize = 11.sp
                             )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Total Pot ${SquaresConfig.formatMoney(payouts.totalPot)} | Operator fee 15% | Prize Pool ${SquaresConfig.formatMoney(payouts.prizePool)}",
+                                color = TvOrangeFocus,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
 
-                        // Payout breakdown boxes
+                        // Payout breakdown boxes from prize pool
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (isHalves) {
-                                PayoutBadge(title = "HALFTIME (50%)", amount = q2Payout)
-                                PayoutBadge(title = "FINAL (50%)", amount = finalPayout, isHighlight = true)
+                                PayoutBadge(title = "HALFTIME (50%)", amountStr = SquaresConfig.formatMoney(payouts.q2Payout))
+                                PayoutBadge(title = "FINAL (50%)", amountStr = SquaresConfig.formatMoney(payouts.finalPayout), isHighlight = true)
                             } else {
-                                PayoutBadge(title = "1ST QUARTER (25%)", amount = q1Payout)
-                                PayoutBadge(title = "HALFTIME (25%)", amount = q2Payout)
-                                PayoutBadge(title = "3RD QUARTER (25%)", amount = q3Payout)
-                                PayoutBadge(title = "FINAL (25%)", amount = finalPayout, isHighlight = true)
+                                PayoutBadge(title = "1ST QUARTER (25%)", amountStr = SquaresConfig.formatMoney(payouts.q1Payout))
+                                PayoutBadge(title = "HALFTIME (25%)", amountStr = SquaresConfig.formatMoney(payouts.q2Payout))
+                                PayoutBadge(title = "3RD QUARTER (25%)", amountStr = SquaresConfig.formatMoney(payouts.q3Payout))
+                                PayoutBadge(title = "FINAL (25%)", amountStr = SquaresConfig.formatMoney(payouts.finalPayout), isHighlight = true)
                             }
                         }
                     }
@@ -828,7 +837,7 @@ fun SquaresScreen(
                             )
                         } else {
                             Text(
-                                text = "Select square price. Total Pot and payouts update live below.",
+                                text = "Select square price. Total Pot, 15% Admin Fee, Prize Pool, and payouts update live below.",
                                 color = TvTextSecondary,
                                 fontSize = 11.sp
                             )
@@ -860,6 +869,58 @@ fun SquaresScreen(
                                     }
                                 }
                             )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Live Prize Pool & Admin Fee preview box next to price options
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF0F172A))
+                                .border(1.dp, Color(0xFF334155), RoundedCornerShape(8.dp))
+                                .padding(10.dp)
+                        ) {
+                            Column {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                        Text(
+                                            text = "Total Pot: ${SquaresConfig.formatMoney(payouts.totalPot)}",
+                                            color = TvLimeAccent,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Admin Fee (15%): ${SquaresConfig.formatMoney(payouts.adminFee)}",
+                                            color = TvOrangeFocus,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Prize Pool (85%): ${SquaresConfig.formatMoney(payouts.prizePool)}",
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                val payoutsLine = if (isHalves) {
+                                    "Winner Payouts (Prize Pool): Halftime ${SquaresConfig.formatMoney(payouts.q2Payout)} (50%) · Final ${SquaresConfig.formatMoney(payouts.finalPayout)} (50%)"
+                                } else {
+                                    "Winner Payouts (Prize Pool): Q1 ${SquaresConfig.formatMoney(payouts.q1Payout)} · Halftime ${SquaresConfig.formatMoney(payouts.q2Payout)} · Q3 ${SquaresConfig.formatMoney(payouts.q3Payout)} · Final ${SquaresConfig.formatMoney(payouts.finalPayout)} (25% each)"
+                                }
+                                Text(
+                                    text = payoutsLine,
+                                    color = Color(0xFF94A3B8),
+                                    fontSize = 11.sp
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -1012,7 +1073,7 @@ fun SquaresScreen(
                         Divider(color = Color(0xFF2A344A))
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // (C) SALES SUMMARY PER PAYMENT METHOD
+                        // (C) SALES SUMMARY PER PAYMENT METHOD & FEE BREAKDOWN
                         Text(
                             text = "3. Sales Summary & Collection Breakdown",
                             color = Color.White,
@@ -1021,15 +1082,28 @@ fun SquaresScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
 
+                        // Row 1: Board Financials (Squares Sold, Total Collected, Admin Fee 15%, Prize Pool)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            SalesStatCard("TOTAL COLLECTED", "$$totalCollected", "${squaresBoard.sales.size} sales", TvLimeAccent, Modifier.weight(1f))
-                            SalesStatCard("CASH APP", "$$${cashAppSales.sumOf { it.totalAmount }}", "${cashAppSales.size} sales", Color(0xFF00D632), Modifier.weight(1f))
-                            SalesStatCard("PAYPAL", "$$${paypalSales.sumOf { it.totalAmount }}", "${paypalSales.size} sales", Color(0xFF0079C1), Modifier.weight(1f))
-                            SalesStatCard("ZELLE", "$$${zelleSales.sumOf { it.totalAmount }}", "${zelleSales.size} sales", Color(0xFF7414CA), Modifier.weight(1f))
-                            SalesStatCard("CASH", "$$${cashSales.sumOf { it.totalAmount }}", "${cashSales.size} sales", Color(0xFFFFA000), Modifier.weight(1f))
+                            SalesStatCard("SQUARES SOLD", "$soldCount / 100", "${squaresBoard.sales.size} sales", TvOrangeFocus, Modifier.weight(1f))
+                            SalesStatCard("TOTAL COLLECTED", SquaresConfig.formatMoney(totalCollected.toDouble()), "100% of receipts", TvLimeAccent, Modifier.weight(1f))
+                            SalesStatCard("ADMIN FEE (15%)", SquaresConfig.formatMoney(adminFeeCollected), "Operator earnings", Color(0xFFFFB300), Modifier.weight(1f))
+                            SalesStatCard("PRIZE POOL", SquaresConfig.formatMoney(prizePoolCollected), "85% for winners", Color.White, Modifier.weight(1f))
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Row 2: Collected per Payment Method
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SalesStatCard("CASH APP", SquaresConfig.formatMoney(cashAppSales.sumOf { it.totalAmount }.toDouble()), "${cashAppSales.size} sales", Color(0xFF00D632), Modifier.weight(1f))
+                            SalesStatCard("PAYPAL", SquaresConfig.formatMoney(paypalSales.sumOf { it.totalAmount }.toDouble()), "${paypalSales.size} sales", Color(0xFF0079C1), Modifier.weight(1f))
+                            SalesStatCard("ZELLE", SquaresConfig.formatMoney(zelleSales.sumOf { it.totalAmount }.toDouble()), "${zelleSales.size} sales", Color(0xFF7414CA), Modifier.weight(1f))
+                            SalesStatCard("CASH", SquaresConfig.formatMoney(cashSales.sumOf { it.totalAmount }.toDouble()), "${cashSales.size} sales", Color(0xFFFFA000), Modifier.weight(1f))
                         }
                     }
                 }
@@ -1202,17 +1276,17 @@ fun SquaresScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     if (isHalves) {
-                        QuarterPayoutRow("Halftime", "$$q2Payout", "Score at end of 1st half", squaresBoard)
+                        QuarterPayoutRow("Halftime", SquaresConfig.formatMoney(payouts.q2Payout), "50% of prize pool (score at end of 1st half)", squaresBoard)
                         Spacer(modifier = Modifier.height(6.dp))
-                        QuarterPayoutRow("Final Score", "$$finalPayout", "Final score including overtimes", squaresBoard)
+                        QuarterPayoutRow("Final Score", SquaresConfig.formatMoney(payouts.finalPayout), "50% of prize pool (final score including overtimes)", squaresBoard)
                     } else {
-                        QuarterPayoutRow("1st Quarter", "$$q1Payout", "Score at end of Q1", squaresBoard)
+                        QuarterPayoutRow("1st Quarter", SquaresConfig.formatMoney(payouts.q1Payout), "25% of prize pool (score at end of Q1)", squaresBoard)
                         Spacer(modifier = Modifier.height(6.dp))
-                        QuarterPayoutRow("Halftime (Q2)", "$$q2Payout", "Score at halftime", squaresBoard)
+                        QuarterPayoutRow("Halftime (Q2)", SquaresConfig.formatMoney(payouts.q2Payout), "25% of prize pool (score at halftime)", squaresBoard)
                         Spacer(modifier = Modifier.height(6.dp))
-                        QuarterPayoutRow("3rd Quarter", "$$q3Payout", "Score at end of Q3", squaresBoard)
+                        QuarterPayoutRow("3rd Quarter", SquaresConfig.formatMoney(payouts.q3Payout), "25% of prize pool (score at end of Q3)", squaresBoard)
                         Spacer(modifier = Modifier.height(6.dp))
-                        QuarterPayoutRow("Final Score", "$$finalPayout", "Final score including overtimes", squaresBoard)
+                        QuarterPayoutRow("Final Score", SquaresConfig.formatMoney(payouts.finalPayout), "25% of prize pool (final score including overtimes)", squaresBoard)
                     }
                 }
             }
@@ -1240,7 +1314,7 @@ fun SquaresScreen(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Refund Policy: All payments are fully refundable unless at least 75% of squares are sold. The board operator may refund and cancel the board at any time if this is not met.",
+                        text = "Refund Policy: If this board is cancelled or refunded, buyers receive a FULL refund of the entire amount paid, including the 15% operator fee portion. All payments are fully refundable unless at least 75% of squares are sold.",
                         color = Color(0xFFCBD5E1),
                         fontSize = 12.sp,
                         lineHeight = 17.sp
@@ -1553,6 +1627,18 @@ fun SquaresScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
 
+                        val parsedPrice = customPriceInputText.toIntOrNull()
+                        if (parsedPrice != null && parsedPrice in 1..1000) {
+                            val customPayouts = SquaresConfig.calculatePayouts(parsedPrice, squaresBoard.payoutType)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Total Pot: ${SquaresConfig.formatMoney(customPayouts.totalPot)} | Admin Fee (15%): ${SquaresConfig.formatMoney(customPayouts.adminFee)} | Prize Pool: ${SquaresConfig.formatMoney(customPayouts.prizePool)}",
+                                color = TvOrangeFocus,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(16.dp))
 
                         Row(
@@ -1641,7 +1727,7 @@ private fun SquareCellBox(
 }
 
 @Composable
-private fun PayoutBadge(title: String, amount: Int, isHighlight: Boolean = false) {
+private fun PayoutBadge(title: String, amountStr: String, isHighlight: Boolean = false) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
@@ -1658,7 +1744,7 @@ private fun PayoutBadge(title: String, amount: Int, isHighlight: Boolean = false
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = "$$amount",
+                text = amountStr,
                 color = if (isHighlight) TvLimeAccent else Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Black
