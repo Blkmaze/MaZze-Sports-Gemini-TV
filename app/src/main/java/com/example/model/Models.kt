@@ -99,6 +99,27 @@ data class SquareSale(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+data class SquareAssignResult(
+    val success: Boolean,
+    val assignedIndices: List<Int> = emptyList(),
+    val errorMessage: String? = null,
+    val initials: String = ""
+) {
+    val assignedSquares: List<Int> get() = assignedIndices
+
+    fun formatCoordinates(): String {
+        return assignedIndices.map { "row ${it / 10 + 1} col ${it % 10 + 1}" }.joinToString(", ")
+    }
+}
+
+data class SquaresActivityLog(
+    val id: String = "",
+    val timestamp: Long = System.currentTimeMillis(),
+    val action: String = "",
+    val description: String = "",
+    val isError: Boolean = false
+)
+
 data class SquaresBoard(
     val gameId: String = "",
     val boardVersion: Int = 1,
@@ -110,7 +131,8 @@ data class SquaresBoard(
     val awayNumbers: List<Int> = emptyList(),
     val cells: List<SquareCell> = emptyList(),
     val pendingEntries: List<SquarePendingEntry> = emptyList(),
-    val sales: List<SquareSale> = emptyList()
+    val sales: List<SquareSale> = emptyList(),
+    val activityLogs: List<SquaresActivityLog> = emptyList()
 )
 
 object SquaresConfig {

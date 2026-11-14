@@ -234,7 +234,10 @@ object ChannelMatchingHelper {
             }
 
             if (channel.isSports) score += 10
-            channel to score
+            // FIX: a channel must match at least one team. Network-only or "women"-only matches caused wrong games (LSU -> Georgetown volleyball).
+            val otherSports = listOf("volleyball", "softball", "soccer", "lacrosse", "wrestling", "baseball", "hockey")
+            val wrongSport = otherSports.any { sp -> (containsToken(cName, sp) || containsToken(cGroup, sp)) && !league.contains(sp) }
+            channel to (if (hasTeamMatch && !wrongSport) score else 0)
         }.filter { it.second > 0 }
             .sortedByDescending { it.second }
             .take(limit)

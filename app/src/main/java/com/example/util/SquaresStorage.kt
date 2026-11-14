@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.model.SquareCell
 import com.example.model.SquarePendingEntry
 import com.example.model.SquareSale
+import com.example.model.SquaresActivityLog
 import com.example.model.SquaresBoard
 import org.json.JSONArray
 import org.json.JSONObject
@@ -71,9 +72,8 @@ class SquaresStorage(context: Context) {
             } ?: (0..9).shuffled()
 
             val cellsArr = json.optJSONArray("cells")
-            val cells = if (cellsArr != null && cellsArr.length() == 100) {
-                (0 until cellsArr.length()).map { i ->
-                    val c = cellsArr.getJSONObject(i)
+            val cellsMap = (0 until (cellsArr?.length() ?: 0)).mapNotNull { i ->
+                cellsArr?.optJSONObject(i)?.let { c ->
                     SquareCell(
                         index = c.optInt("index", i),
                         row = c.optInt("row", i / 10),
@@ -82,10 +82,9 @@ class SquaresStorage(context: Context) {
                         isUserSquare = c.optBoolean("isUser", false)
                     )
                 }
-            } else {
-                (0 until 100).map { i ->
-                    SquareCell(index = i, row = i / 10, col = i % 10, ownerName = "", isUserSquare = false)
-                }
+            }.associateBy { it.index }
+            var cells = (0 until 100).map { i ->
+                cellsMap[i] ?: SquareCell(index = i, row = i / 10, col = i % 10, ownerName = "", isUserSquare = false)
             }
 
             val pendingArr = json.optJSONArray("pending")
@@ -121,6 +120,33 @@ class SquaresStorage(context: Context) {
                 }
             } else emptyList()
 
+            // Auto-heal: If sales have assignedSquares, ensure cells reflect the owner
+            sales.forEach { sale ->
+                if (sale.assignedSquares.isNotEmpty() && sale.initials.isNotBlank()) {
+                    cells = cells.map { cell ->
+                        if (cell.index in sale.assignedSquares && cell.ownerName.isBlank()) {
+                            cell.copy(ownerName = sale.initials, isUserSquare = true)
+                        } else {
+                            cell
+                        }
+                    }
+                }
+            }
+
+            val logsArr = json.optJSONArray("logs")
+            val activityLogs = if (logsArr != null) {
+                (0 until logsArr.length()).map { i ->
+                    val l = logsArr.getJSONObject(i)
+                    SquaresActivityLog(
+                        id = l.optString("id", UUID.randomUUID().toString()),
+                        timestamp = l.optLong("time", System.currentTimeMillis()),
+                        action = l.optString("action", ""),
+                        description = l.optString("desc", ""),
+                        isError = l.optBoolean("error", false)
+                    )
+                }
+            } else emptyList()
+
             SquaresBoard(
                 gameId = gameId,
                 boardVersion = boardVersion,
@@ -132,7 +158,8 @@ class SquaresStorage(context: Context) {
                 awayNumbers = awayNumbers,
                 cells = cells,
                 pendingEntries = pendingEntries,
-                sales = sales
+                sales = sales,
+                activityLogs = activityLogs
             )
         } catch (e: Throwable) {
             null
@@ -191,6 +218,18 @@ class SquaresStorage(context: Context) {
                 })
             }
             put("sales", salesArr)
+
+            val logsArr = JSONArray()
+            board.activityLogs.take(50).forEach { log ->
+                logsArr.put(JSONObject().apply {
+                    put("id", log.id)
+                    put("time", log.timestamp)
+                    put("action", log.action)
+                    put("desc", log.description)
+                    put("error", log.isError)
+                })
+            }
+            put("logs", logsArr)
         }
         prefs.edit().putString(key, json.toString()).apply()
     }

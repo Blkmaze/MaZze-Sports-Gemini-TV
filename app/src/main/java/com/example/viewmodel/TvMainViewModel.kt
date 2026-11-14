@@ -946,25 +946,66 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private fun sanitizeCells(cells: List<SquareCell>): List<SquareCell> {
+        if (cells.size == 100) return cells
+        val map = cells.associateBy { it.index }
+        return (0 until 100).map { i ->
+            map[i] ?: SquareCell(index = i, row = i / 10, col = i % 10, ownerName = "", isUserSquare = false)
+        }
+    }
+
+    private fun appendLog(board: SquaresBoard, action: String, description: String, isError: Boolean = false): SquaresBoard {
+        val log = SquaresActivityLog(
+            id = UUID.randomUUID().toString(),
+            timestamp = System.currentTimeMillis(),
+            action = action,
+            description = description,
+            isError = isError
+        )
+        val updatedLogs = (listOf(log) + board.activityLogs).take(50)
+        return board.copy(activityLogs = updatedLogs)
+    }
+
     fun submitPendingEntry(initials: String, count: Int, paymentMethod: String): Boolean {
         val board = _squaresBoard.value
-        if (board.isBoardLocked) return false
         val cleanInitials = initials.trim().uppercase().take(3)
-        if (cleanInitials.length < 2) return false
-        val soldCount = board.cells.count { it.ownerName.isNotBlank() }
+        if (board.isBoardLocked) {
+            val updated = appendLog(board, "PENDING_REJECTED", "Failed to submit $count sq for $cleanInitials: Board is locked", isError = true)
+            _squaresBoard.value = updated
+            viewModelScope.launch(Dispatchers.IO + exceptionHandler) { squaresStorage.saveBoard(updated) }
+            return false
+        }
+        if (cleanInitials.length < 2) {
+            val updated = appendLog(board, "PENDING_REJECTED", "Failed to submit: initials '$initials' must be 2-3 letters", isError = true)
+            _squaresBoard.value = updated
+            viewModelScope.launch(Dispatchers.IO + exceptionHandler) { squaresStorage.saveBoard(updated) }
+            return false
+        }
+        val validCells = sanitizeCells(board.cells)
+        val soldCount = validCells.count { it.ownerName.trim().isNotBlank() }
         val pendingCount = board.pendingEntries.sumOf { it.count }
         val available = (100 - soldCount - pendingCount).coerceAtLeast(0)
-        if (count <= 0 || count > available) return false
+        if (count <= 0 || count > available) {
+            val updated = appendLog(board, "PENDING_REJECTED", "Failed to submit $count sq for $cleanInitials: only $available available", isError = true)
+            _squaresBoard.value = updated
+            viewModelScope.launch(Dispatchers.IO + exceptionHandler) { squaresStorage.saveBoard(updated) }
+            return false
+        }
 
+        val methodClean = paymentMethod.ifBlank { "CASH" }.uppercase()
         val entry = SquarePendingEntry(
             id = UUID.randomUUID().toString(),
             initials = cleanInitials,
             count = count,
-            paymentMethod = paymentMethod.uppercase(),
+            paymentMethod = methodClean,
             totalAmount = count * board.pricePerSquare,
             timestamp = System.currentTimeMillis()
         )
-        val updatedBoard = board.copy(pendingEntries = board.pendingEntries + entry)
+        var updatedBoard = board.copy(
+            cells = validCells,
+            pendingEntries = board.pendingEntries + entry
+        )
+        updatedBoard = appendLog(updatedBoard, "PENDING_CREATED", "Pending entry created: $count sq for $cleanInitials via $methodClean ($${entry.totalAmount})")
         _squaresBoard.value = updatedBoard
         viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
             squaresStorage.saveBoard(updatedBoard)
@@ -972,50 +1013,195 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
         return true
     }
 
-    fun confirmPendingPaid(entryId: String): List<Int> {
+    fun confirmPendingPaid(entryId: String): SquareAssignResult {
         val board = _squaresBoard.value
-        val entry = board.pendingEntries.firstOrNull { it.id == entryId } ?: return emptyList()
-        val openCells = board.cells.filter { it.ownerName.isBlank() }
-        if (openCells.size < entry.count) return emptyList()
+        if (board.isBoardLocked) {
+            val err = "Board is locked. Unlock the board in Admin Zone to assign squares."
+            val updated = appendLog(board, "CONFIRM_FAILED", err, isError = true)
+            _squaresBoard.value = updated
+            viewModelScope.launch(Dispatchers.IO + exceptionHandler) { squaresStorage.saveBoard(updated) }
+            return SquareAssignResult(success = false, errorMessage = err)
+        }
+
+        val entry = board.pendingEntries.firstOrNull { it.id == entryId }
+        if (entry == null) {
+            val err = "Pending entry not found (may have already been confirmed or released)."
+            return SquareAssignResult(success = false, errorMessage = err)
+        }
+
+        val cleanInitials = entry.initials.trim().uppercase().take(3).ifBlank { "BUY" }
+        val validCells = sanitizeCells(board.cells)
+        val openCells = validCells.filter { it.ownerName.trim().isBlank() }
+        if (openCells.size < entry.count) {
+            val err = "Not enough open squares. Only ${openCells.size} open, but ${entry.count} requested."
+            val updated = appendLog(board, "CONFIRM_FAILED", "Failed confirming for $cleanInitials: $err", isError = true)
+            _squaresBoard.value = updated
+            viewModelScope.launch(Dispatchers.IO + exceptionHandler) { squaresStorage.saveBoard(updated) }
+            return SquareAssignResult(success = false, errorMessage = err, initials = cleanInitials)
+        }
 
         val chosenCells = openCells.shuffled().take(entry.count)
         val chosenIndices = chosenCells.map { it.index }.toSet()
 
-        val updatedCells = board.cells.map { cell ->
+        val updatedCells = validCells.map { cell ->
             if (cell.index in chosenIndices) {
-                cell.copy(ownerName = entry.initials, isUserSquare = true)
+                cell.copy(ownerName = cleanInitials, isUserSquare = true)
             } else {
                 cell
             }
         }
 
+        val coords = chosenIndices.map { "row ${it / 10 + 1} col ${it % 10 + 1}" }.joinToString(", ")
         val sale = SquareSale(
             id = UUID.randomUUID().toString(),
-            initials = entry.initials,
+            initials = cleanInitials,
             count = chosenCells.size,
-            paymentMethod = entry.paymentMethod,
+            paymentMethod = entry.paymentMethod.ifBlank { "CASH" }.uppercase(),
             assignedSquares = chosenCells.map { it.index },
             totalAmount = chosenCells.size * board.pricePerSquare,
             timestamp = System.currentTimeMillis()
         )
 
         val updatedPending = board.pendingEntries.filter { it.id != entryId }
-        val updatedBoard = board.copy(
+        var updatedBoard = board.copy(
             cells = updatedCells,
             pendingEntries = updatedPending,
             sales = listOf(sale) + board.sales
         )
+        val logDesc = "Confirmed ${sale.paymentMethod} for $cleanInitials: ${chosenCells.size} square${if (chosenCells.size > 1) "s" else ""} assigned: $coords"
+        updatedBoard = appendLog(updatedBoard, "CONFIRM_PAID", logDesc, isError = false)
+
         _squaresBoard.value = updatedBoard
         viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
             squaresStorage.saveBoard(updatedBoard)
         }
-        return chosenCells.map { it.index }
+        return SquareAssignResult(success = true, assignedIndices = chosenCells.map { it.index }, initials = cleanInitials)
+    }
+
+    fun quickCashSale(initials: String, count: Int): SquareAssignResult {
+        val board = _squaresBoard.value
+        if (board.isBoardLocked) {
+            val err = "Board is locked. Unlock the board in Admin Zone to assign squares."
+            val updated = appendLog(board, "QUICK_CASH_FAILED", err, isError = true)
+            _squaresBoard.value = updated
+            viewModelScope.launch(Dispatchers.IO + exceptionHandler) { squaresStorage.saveBoard(updated) }
+            return SquareAssignResult(success = false, errorMessage = err)
+        }
+
+        val cleanInitials = initials.trim().uppercase().take(3)
+        if (cleanInitials.length < 2) {
+            val err = "Initials must be 2 to 3 letters."
+            return SquareAssignResult(success = false, errorMessage = err)
+        }
+        if (count <= 0) {
+            val err = "Square count must be at least 1."
+            return SquareAssignResult(success = false, errorMessage = err)
+        }
+
+        val validCells = sanitizeCells(board.cells)
+        val openCells = validCells.filter { it.ownerName.trim().isBlank() }
+        if (openCells.size < count) {
+            val err = "Not enough open squares: only ${openCells.size} open, $count requested."
+            val updated = appendLog(board, "QUICK_CASH_FAILED", "Quick cash failed for $cleanInitials: $err", isError = true)
+            _squaresBoard.value = updated
+            viewModelScope.launch(Dispatchers.IO + exceptionHandler) { squaresStorage.saveBoard(updated) }
+            return SquareAssignResult(success = false, errorMessage = err, initials = cleanInitials)
+        }
+
+        val chosenCells = openCells.shuffled().take(count)
+        val chosenIndices = chosenCells.map { it.index }.toSet()
+
+        val updatedCells = validCells.map { cell ->
+            if (cell.index in chosenIndices) {
+                cell.copy(ownerName = cleanInitials, isUserSquare = true)
+            } else {
+                cell
+            }
+        }
+
+        val coords = chosenIndices.map { "row ${it / 10 + 1} col ${it % 10 + 1}" }.joinToString(", ")
+        val sale = SquareSale(
+            id = UUID.randomUUID().toString(),
+            initials = cleanInitials,
+            count = chosenCells.size,
+            paymentMethod = "CASH",
+            assignedSquares = chosenCells.map { it.index },
+            totalAmount = chosenCells.size * board.pricePerSquare,
+            timestamp = System.currentTimeMillis()
+        )
+
+        var updatedBoard = board.copy(
+            cells = updatedCells,
+            sales = listOf(sale) + board.sales
+        )
+        val logDesc = "Quick Cash for $cleanInitials: ${chosenCells.size} square${if (chosenCells.size > 1) "s" else ""} assigned: $coords"
+        updatedBoard = appendLog(updatedBoard, "QUICK_CASH", logDesc, isError = false)
+
+        _squaresBoard.value = updatedBoard
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            squaresStorage.saveBoard(updatedBoard)
+        }
+        return SquareAssignResult(success = true, assignedIndices = chosenCells.map { it.index }, initials = cleanInitials)
+    }
+
+    fun manualAssignSquaresForSale(saleId: String): SquareAssignResult {
+        val board = _squaresBoard.value
+        val sale = board.sales.firstOrNull { it.id == saleId }
+        if (sale == null) {
+            return SquareAssignResult(success = false, errorMessage = "Sale record not found.")
+        }
+
+        val cleanInitials = sale.initials.trim().uppercase().ifBlank { "BUY" }
+        val countNeeded = sale.count.coerceAtLeast(1)
+
+        val validCells = sanitizeCells(board.cells)
+        val openCells = validCells.filter { it.ownerName.trim().isBlank() }
+        if (openCells.size < countNeeded) {
+            val err = "Not enough open squares. Only ${openCells.size} open, $countNeeded needed."
+            val updated = appendLog(board, "MANUAL_ASSIGN_FAILED", "Manual assign for $cleanInitials failed: $err", isError = true)
+            _squaresBoard.value = updated
+            viewModelScope.launch(Dispatchers.IO + exceptionHandler) { squaresStorage.saveBoard(updated) }
+            return SquareAssignResult(success = false, errorMessage = err, initials = cleanInitials)
+        }
+
+        val chosenCells = openCells.shuffled().take(countNeeded)
+        val chosenIndices = chosenCells.map { it.index }.toSet()
+
+        val updatedCells = validCells.map { cell ->
+            if (cell.index in chosenIndices) {
+                cell.copy(ownerName = cleanInitials, isUserSquare = true)
+            } else {
+                cell
+            }
+        }
+
+        val coords = chosenIndices.map { "row ${it / 10 + 1} col ${it % 10 + 1}" }.joinToString(", ")
+        val updatedSale = sale.copy(
+            assignedSquares = chosenCells.map { it.index }
+        )
+        val updatedSales = board.sales.map { if (it.id == saleId) updatedSale else it }
+
+        var updatedBoard = board.copy(
+            cells = updatedCells,
+            sales = updatedSales
+        )
+        val logDesc = "Manual Assign for $cleanInitials: ${chosenCells.size} square${if (chosenCells.size > 1) "s" else ""} assigned: $coords"
+        updatedBoard = appendLog(updatedBoard, "MANUAL_ASSIGN", logDesc, isError = false)
+
+        _squaresBoard.value = updatedBoard
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            squaresStorage.saveBoard(updatedBoard)
+        }
+        return SquareAssignResult(success = true, assignedIndices = chosenCells.map { it.index }, initials = cleanInitials)
     }
 
     fun rejectPendingEntry(entryId: String) {
         val board = _squaresBoard.value
+        val entry = board.pendingEntries.firstOrNull { it.id == entryId }
         val updatedPending = board.pendingEntries.filter { it.id != entryId }
-        val updatedBoard = board.copy(pendingEntries = updatedPending)
+        var updatedBoard = board.copy(pendingEntries = updatedPending)
+        val desc = if (entry != null) "Rejected pending entry for ${entry.initials} (${entry.count} sq, ${entry.paymentMethod})" else "Rejected pending entry $entryId"
+        updatedBoard = appendLog(updatedBoard, "PENDING_REJECTED", desc)
         _squaresBoard.value = updatedBoard
         viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
             squaresStorage.saveBoard(updatedBoard)
@@ -1024,7 +1210,9 @@ class TvMainViewModel(application: Application) : AndroidViewModel(application) 
 
     fun releaseAllPending() {
         val board = _squaresBoard.value
-        val updatedBoard = board.copy(pendingEntries = emptyList())
+        val count = board.pendingEntries.size
+        var updatedBoard = board.copy(pendingEntries = emptyList())
+        updatedBoard = appendLog(updatedBoard, "RELEASE_ALL_PENDING", "Released all $count pending entries")
         _squaresBoard.value = updatedBoard
         viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
             squaresStorage.saveBoard(updatedBoard)

@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.model.Game
+import com.example.model.SquareAssignResult
 import com.example.model.SquaresBoard
 import com.example.model.SquaresConfig
 import com.example.model.SquaresPayouts
@@ -76,7 +78,9 @@ fun SquaresScreen(
     onOpenLink: (String) -> Unit = {},
     onOpenBrowser: (String) -> Unit = onOpenLink,
     onSubmitPendingEntry: (String, Int, String) -> Boolean = { _, _, _ -> false },
-    onConfirmPendingPaid: (String) -> List<Int> = { emptyList() },
+    onConfirmPendingPaid: (String) -> SquareAssignResult = { SquareAssignResult(false, emptyList(), "Not initialized") },
+    onQuickCashSale: (String, Int) -> SquareAssignResult = { _, _ -> SquareAssignResult(false, emptyList(), "Not initialized") },
+    onManualAssignSale: (String) -> SquareAssignResult = { SquareAssignResult(false, emptyList(), "Not initialized") },
     onRejectPendingEntry: (String) -> Unit = {},
     onReleaseAllPending: () -> Unit = {},
     onToggleLockBoard: () -> Unit = {},
@@ -141,6 +145,12 @@ fun SquaresScreen(
 
     // Confirmation message for admin actions
     var adminToastMessage by remember { mutableStateOf<String?>(null) }
+    var adminErrorMessage by remember { mutableStateOf<String?>(null) }
+    var adminSuccessMessage by remember { mutableStateOf<String?>(null) }
+
+    // Quick Cash Sale State in Admin Zone
+    var quickCashInitials by remember { mutableStateOf("") }
+    var quickCashCount by remember { mutableIntStateOf(1) }
 
     // Focused cell for inspector
     var focusedCellIndex by remember { mutableStateOf<Int?>(null) }
@@ -818,6 +828,132 @@ fun SquaresScreen(
                             }
                         }
 
+                        // Admin Error Message Card
+                        adminErrorMessage?.let { errMsg ->
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF3B1212))
+                                    .border(1.dp, Color(0xFFEF4444), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color(0xFFF87171), modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(text = errMsg, color = Color(0xFFFCA5A5), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                                TvFocusButton(
+                                    text = "Dismiss",
+                                    onClick = { adminErrorMessage = null },
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
+                            }
+                        }
+
+                        // Admin Success Message Card
+                        adminSuccessMessage?.let { succMsg ->
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF0F2E1E))
+                                    .border(1.dp, TvLimeAccent, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = TvLimeAccent, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(text = succMsg, color = Color(0xFFDCFCE7), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                                TvFocusButton(
+                                    text = "Dismiss",
+                                    onClick = { adminSuccessMessage = null },
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
+                            }
+                        }
+
+                        // Unassigned Sales Fix-Up ("Needs Squares")
+                        val unassignedSales = remember(squaresBoard.sales) {
+                            squaresBoard.sales.filter { it.assignedSquares.isEmpty() }
+                        }
+                        if (unassignedSales.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF3E1F00))
+                                    .border(1.dp, Color(0xFFFF9800), RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFFB74D), modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "NEEDS SQUARES: ${unassignedSales.size} Confirmed Sale(s) Have 0 Assigned Squares!",
+                                        color = Color(0xFFFFE0B2),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "The following sales were confirmed or imported without square coordinates. Tap 'Assign Squares Now' to auto-assign random available squares.",
+                                    color = Color(0xFFFFCC80),
+                                    fontSize = 11.sp
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                unassignedSales.forEach { sale ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFF231200))
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Sale #${sale.id.takeLast(6)}: ${sale.initials} · ${sale.count} sq · $${sale.totalAmount} (${sale.paymentMethod})",
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        TvFocusButton(
+                                            text = "Assign Squares Now",
+                                            icon = Icons.Default.AutoFixHigh,
+                                            isPrimary = true,
+                                            onClick = {
+                                                val res = onManualAssignSale(sale.id)
+                                                if (res.success) {
+                                                    adminSuccessMessage = "Assigned squares to ${sale.initials}: ${res.formatCoordinates()}"
+                                                    adminErrorMessage = null
+                                                } else {
+                                                    adminErrorMessage = res.errorMessage ?: "Failed to assign squares for sale ${sale.id}"
+                                                    adminSuccessMessage = null
+                                                }
+                                            }
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                }
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(12.dp))
 
                         // (A) BOARD SETUP: PRICE PER SQUARE & PAYOUT TYPE
@@ -951,7 +1087,174 @@ fun SquaresScreen(
                         Divider(color = Color(0xFF2A344A))
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // (B) MANAGE PENDING PAYMENTS
+                        // 2. QUICK CASH SALE (IN-PERSON DIRECT ASSIGNMENT)
+                        Text(
+                            text = "2. Quick Cash Sale (In-Person Direct Assignment)",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Buyer paid cash directly to organizer. Assigns open squares immediately, records CASH payment, and updates the board without a pending queue.",
+                            color = TvTextSecondary,
+                            fontSize = 11.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        if (squaresBoard.isBoardLocked) {
+                            Text(
+                                text = "Board is locked. Unlock board above to make sales.",
+                                color = Color(0xFFFFB74D),
+                                fontSize = 12.sp
+                            )
+                        } else if (availableCount <= 0) {
+                            Text(
+                                text = "Board is full. No open squares available.",
+                                color = Color(0xFFFFB74D),
+                                fontSize = 12.sp
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF0F172A))
+                                    .border(1.dp, Color(0xFF334155), RoundedCornerShape(8.dp))
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                // Initials input
+                                Column(modifier = Modifier.width(160.dp)) {
+                                    Text(
+                                        text = "Initials (2-3 letters)",
+                                        color = TvTextSecondary,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    OutlinedTextField(
+                                        value = quickCashInitials,
+                                        onValueChange = { input ->
+                                            quickCashInitials = input.filter { it.isLetter() }.uppercase().take(3)
+                                        },
+                                        singleLine = true,
+                                        placeholder = { Text("JDM", color = Color(0xFF64748B), fontSize = 13.sp) },
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = TvOrangeFocus,
+                                            unfocusedBorderColor = Color(0xFF334155),
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White,
+                                            focusedContainerColor = TvDarkBackground,
+                                            unfocusedContainerColor = TvDarkBackground
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+
+                                // Stepper
+                                Column(modifier = Modifier.width(150.dp)) {
+                                    Text(
+                                        text = "Quantity (max $availableCount)",
+                                        color = TvTextSecondary,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(TvDarkBackground)
+                                            .border(1.dp, Color(0xFF334155), RoundedCornerShape(8.dp))
+                                            .padding(horizontal = 4.dp, vertical = 4.dp)
+                                    ) {
+                                        TvFocusButton(
+                                            text = "-",
+                                            onClick = { if (quickCashCount > 1) quickCashCount-- },
+                                            modifier = Modifier.size(36.dp)
+                                        )
+                                        Text(
+                                            text = "$quickCashCount",
+                                            color = Color.White,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Black,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        TvFocusButton(
+                                            text = "+",
+                                            onClick = { if (quickCashCount < availableCount) quickCashCount++ },
+                                            modifier = Modifier.size(36.dp)
+                                        )
+                                    }
+                                }
+
+                                // Amount due preview
+                                val quickCashAmount = quickCashCount * squaresBoard.pricePerSquare
+                                Column(modifier = Modifier.width(120.dp)) {
+                                    Text(
+                                        text = "Cash Collected",
+                                        color = TvTextSecondary,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(TvDarkBackground)
+                                            .border(1.dp, Color(0xFF334155), RoundedCornerShape(8.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "$$quickCashAmount",
+                                            color = TvLimeAccent,
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                }
+
+                                // Action Button
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    TvFocusButton(
+                                        text = "Cash Received - Assign Now",
+                                        icon = Icons.Default.Payments,
+                                        isPrimary = true,
+                                        onClick = {
+                                            if (quickCashInitials.length < 2) {
+                                                adminErrorMessage = "Please enter 2 to 3 buyer initials."
+                                                adminSuccessMessage = null
+                                            } else {
+                                                val res = onQuickCashSale(quickCashInitials, quickCashCount)
+                                                if (res.success) {
+                                                    val coords = res.formatCoordinates()
+                                                    adminSuccessMessage = "Quick Cash Sale Confirmed! Assigned ${res.assignedSquares.size} squares to $quickCashInitials: $coords"
+                                                    adminErrorMessage = null
+                                                    Toast.makeText(context, "Assigned ${res.assignedSquares.size} squares to $quickCashInitials", Toast.LENGTH_LONG).show()
+                                                    quickCashInitials = ""
+                                                    quickCashCount = 1
+                                                } else {
+                                                    adminErrorMessage = res.errorMessage ?: "Failed to assign squares."
+                                                    adminSuccessMessage = null
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Divider(color = Color(0xFF2A344A))
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // 3. MANAGE PENDING PAYMENTS
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -959,7 +1262,7 @@ fun SquaresScreen(
                         ) {
                             Column {
                                 Text(
-                                    text = "2. Manage Pending Payments (${squaresBoard.pendingEntries.size} pending)",
+                                    text = "3. Manage Pending Payments (${squaresBoard.pendingEntries.size} pending)",
                                     color = Color.White,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold
@@ -1050,9 +1353,17 @@ fun SquaresScreen(
                                                 icon = Icons.Default.CheckCircle,
                                                 isPrimary = true,
                                                 onClick = {
-                                                    val assigned = onConfirmPendingPaid(entry.id)
-                                                    adminToastMessage = "Confirmed ${entry.initials}! Assigned ${assigned.size} squares."
-                                                    Toast.makeText(context, "Confirmed ${entry.initials} (${assigned.size} squares)", Toast.LENGTH_SHORT).show()
+                                                    val res = onConfirmPendingPaid(entry.id)
+                                                    if (res.success) {
+                                                        val coords = res.formatCoordinates()
+                                                        adminSuccessMessage = "Confirmed ${entry.initials}! Assigned ${res.assignedSquares.size} squares: $coords"
+                                                        adminErrorMessage = null
+                                                        Toast.makeText(context, "Confirmed ${entry.initials} ($coords)", Toast.LENGTH_LONG).show()
+                                                    } else {
+                                                        adminErrorMessage = "Failed to confirm ${entry.initials}: ${res.errorMessage ?: "Unknown error"}"
+                                                        adminSuccessMessage = null
+                                                        Toast.makeText(context, "Error: ${res.errorMessage}", Toast.LENGTH_SHORT).show()
+                                                    }
                                                 }
                                             )
                                             TvFocusButton(
@@ -1060,6 +1371,8 @@ fun SquaresScreen(
                                                 icon = Icons.Default.Cancel,
                                                 onClick = {
                                                     onRejectPendingEntry(entry.id)
+                                                    adminSuccessMessage = "Rejected pending entry for ${entry.initials}"
+                                                    adminErrorMessage = null
                                                     Toast.makeText(context, "Rejected pending entry for ${entry.initials}", Toast.LENGTH_SHORT).show()
                                                 }
                                             )
@@ -1073,9 +1386,9 @@ fun SquaresScreen(
                         Divider(color = Color(0xFF2A344A))
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // (C) SALES SUMMARY PER PAYMENT METHOD & FEE BREAKDOWN
+                        // 4. SALES SUMMARY & COLLECTION BREAKDOWN
                         Text(
-                            text = "3. Sales Summary & Collection Breakdown",
+                            text = "4. Sales Summary & Collection Breakdown",
                             color = Color.White,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
@@ -1104,6 +1417,91 @@ fun SquaresScreen(
                             SalesStatCard("PAYPAL", SquaresConfig.formatMoney(paypalSales.sumOf { it.totalAmount }.toDouble()), "${paypalSales.size} sales", Color(0xFF0079C1), Modifier.weight(1f))
                             SalesStatCard("ZELLE", SquaresConfig.formatMoney(zelleSales.sumOf { it.totalAmount }.toDouble()), "${zelleSales.size} sales", Color(0xFF7414CA), Modifier.weight(1f))
                             SalesStatCard("CASH", SquaresConfig.formatMoney(cashSales.sumOf { it.totalAmount }.toDouble()), "${cashSales.size} sales", Color(0xFFFFA000), Modifier.weight(1f))
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Divider(color = Color(0xFF2A344A))
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // 5. ACTIVITY LOG (LAST 50 ACTIONS)
+                        Text(
+                            text = "5. Activity Log (Last ${squaresBoard.activityLogs.size} Actions)",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Complete audit trail of pending entries, confirmations, cash sales, manual assignments, rejections, and errors.",
+                            color = TvTextSecondary,
+                            fontSize = 11.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        if (squaresBoard.activityLogs.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(TvDarkBackground)
+                                    .padding(12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "No activity logged yet.",
+                                    color = Color(0xFF64748B),
+                                    fontSize = 12.sp
+                                )
+                            }
+                        } else {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(TvDarkBackground)
+                                    .border(1.dp, Color(0xFF222B3D), RoundedCornerShape(8.dp))
+                                    .padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                squaresBoard.activityLogs.take(50).forEach { log ->
+                                    val timeStr = SimpleDateFormat("MM/dd h:mm:ss a", Locale.getDefault()).format(Date(log.timestamp))
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(if (log.isError) Color(0xFF451A1A) else Color(0xFF131D2D))
+                                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = timeStr,
+                                            color = Color(0xFF94A3B8),
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(if (log.isError) Color(0xFFEF4444) else Color(0xFF1E293B))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = log.action,
+                                                color = if (log.isError) Color.White else TvLimeAccent,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        Text(
+                                            text = log.description,
+                                            color = if (log.isError) Color(0xFFFCA5A5) else Color.White,
+                                            fontSize = 11.sp,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1400,16 +1798,37 @@ fun SquaresScreen(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         TvFocusButton(
                             text = "Cancel",
                             onClick = { showBuyerPaymentModal = false }
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        if (isAdminUnlocked && buyerPaymentMethod == "CASH") {
+                            TvFocusButton(
+                                text = "Cash Received - Assign Now",
+                                icon = Icons.Default.Payments,
+                                isPrimary = true,
+                                onClick = {
+                                    val res = onQuickCashSale(buyerInitials, buyerSquareCount)
+                                    if (res.success) {
+                                        val coords = res.formatCoordinates()
+                                        Toast.makeText(context, "Cash sale complete! Assigned $buyerInitials: $coords", Toast.LENGTH_LONG).show()
+                                        buyerInitials = ""
+                                        buyerSquareCount = 1
+                                        showBuyerPaymentModal = false
+                                    } else {
+                                        Toast.makeText(context, "Error: ${res.errorMessage}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                        }
                         TvFocusButton(
-                            text = "Confirm & Submit Pending",
-                            isPrimary = true,
+                            text = if (buyerPaymentMethod == "CASH") "Submit as Pending Cash" else "Confirm & Submit Pending",
+                            isPrimary = !(isAdminUnlocked && buyerPaymentMethod == "CASH"),
                             onClick = {
                                 val success = onSubmitPendingEntry(buyerInitials, buyerSquareCount, buyerPaymentMethod)
                                 showBuyerPaymentModal = false

@@ -255,6 +255,8 @@ class MainActivity : ComponentActivity() {
                                         onOpenBrowser = { viewModel.openBrowserLink(it) },
                                         onSubmitPendingEntry = { initials, count, method -> viewModel.submitPendingEntry(initials, count, method) },
                                         onConfirmPendingPaid = { viewModel.confirmPendingPaid(it) },
+                                        onQuickCashSale = { initials, count -> viewModel.quickCashSale(initials, count) },
+                                        onManualAssignSale = { viewModel.manualAssignSquaresForSale(it) },
                                         onRejectPendingEntry = { viewModel.rejectPendingEntry(it) },
                                         onReleaseAllPending = { viewModel.releaseAllPending() },
                                         onToggleLockBoard = { viewModel.toggleLockBoard() },
