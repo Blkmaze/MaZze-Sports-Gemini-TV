@@ -93,19 +93,11 @@ fun HomeScreen(
 
         if (matchedGame != null) {
             val candidates = ChannelMatchingHelper.findCandidatesForGame(matchedGame, channels)
-            if (candidates.isNotEmpty()) {
-                selectedGameActionMenu = GameActionMenuData(
-                    title = "${matchedGame.awayTeam.displayName} @ ${matchedGame.homeTeam.displayName}",
-                    candidates = candidates,
-                    network = matchedGame.network
-                )
-            } else {
-                teamNoGameDialog = TeamNoGameDialogData(
-                    team = team,
-                    isWomens = isWomens,
-                    matchedGame = matchedGame
-                )
-            }
+            selectedGameActionMenu = GameActionMenuData(
+                title = "${matchedGame.awayTeam.displayName} @ ${matchedGame.homeTeam.displayName}",
+                candidates = candidates,
+                network = matchedGame.network
+            )
         } else {
             teamNoGameDialog = TeamNoGameDialogData(
                 team = team,
@@ -564,27 +556,88 @@ fun HomeScreen(
                             },
                             modifier = Modifier.fillMaxWidth()
                         )
-                        Spacer(modifier = Modifier.height(10.dp))
+                    } else {
+                        val netLabel = menuData.network.ifBlank { "this game" }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(TvDarkCard.copy(alpha = 0.45f))
+                                .border(1.dp, Color(0xFF334155), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.TvOff,
+                                contentDescription = null,
+                                tint = TvTextMuted,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "No channel found for $netLabel",
+                                color = TvTextMuted,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
 
-                    TvFocusButton(
-                        text = "Add to Multiview",
-                        icon = Icons.Default.GridView,
-                        onClick = {
-                            selectedGameActionMenu = null
-                            val slot = onAddToMultiview(menuData.title, menuData.candidates)
-                            val msg = if (slot >= 0) "Added to Multiview Tile ${slot + 1}" else "Multiview updated"
-                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (topCandidate != null) {
+                        TvFocusButton(
+                            text = "Add to Multiview",
+                            icon = Icons.Default.GridView,
+                            onClick = {
+                                selectedGameActionMenu = null
+                                val slot = onAddToMultiview(menuData.title, menuData.candidates)
+                                val msg = if (slot >= 0) "Added to Multiview Tile ${slot + 1}" else "Multiview updated"
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(TvDarkCard.copy(alpha = 0.45f))
+                                .border(1.dp, Color(0xFF334155), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.GridView,
+                                contentDescription = null,
+                                tint = TvTextMuted,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Add to Multiview (No channel)",
+                                color = TvTextMuted,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
                     if (menuData.network.isNotBlank()) {
                         TvFocusButton(
-                            text = "Search '${menuData.network}' Channels",
+                            text = "Search ${menuData.network} Channels",
                             icon = Icons.Default.Search,
+                            isPrimary = topCandidate == null,
                             onClick = {
                                 selectedGameActionMenu = null
                                 onFindChannel(menuData.network)
@@ -596,6 +649,7 @@ fun HomeScreen(
                         TvFocusButton(
                             text = "Search Channels for Matchup",
                             icon = Icons.Default.Search,
+                            isPrimary = topCandidate == null,
                             onClick = {
                                 selectedGameActionMenu = null
                                 onFindChannel(menuData.title)

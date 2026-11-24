@@ -40,13 +40,17 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.example.model.Channel
 import com.example.ui.components.TvFocusButton
 import com.example.ui.theme.*
+import kotlinx.coroutines.delay
 
 @Composable
 fun MultiviewScreen(
@@ -109,30 +113,33 @@ fun MultiviewScreen(
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             for (idx in 0..1) {
-                val isSound = (idx == activeSoundIndex)
+                key(idx) {
+                    val isSound = (idx == activeSoundIndex)
 
-                MultiviewTile(
-                    tileIndex = idx,
-                    channel = multiviewChannels.getOrNull(idx),
-                    gameTitle = multiviewGameTitles.getOrNull(idx),
-                    isSoundActive = isSound,
-                    shouldPlayVideo = true,
-                    onClick = {
-                        if (activeSoundIndex != idx) {
-                            onSetSoundIndex(idx)
-                        }
-                        activeMenuTile = idx
-                    },
-                    onFocusGained = {
-                        if (activeSoundIndex != idx) {
-                            onSetSoundIndex(idx)
-                        }
-                    },
-                    onOpenMenu = { activeMenuTile = idx },
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                )
+                    MultiviewTile(
+                        tileIndex = idx,
+                        channel = multiviewChannels.getOrNull(idx),
+                        gameTitle = multiviewGameTitles.getOrNull(idx),
+                        isSoundActive = isSound,
+                        shouldPlayVideo = true,
+                        onClick = {
+                            if (activeSoundIndex != idx) {
+                                onSetSoundIndex(idx)
+                            }
+                            activeMenuTile = idx
+                        },
+                        onFocusGained = {
+                            if (activeSoundIndex != idx) {
+                                onSetSoundIndex(idx)
+                            }
+                        },
+                        onOpenMenu = { activeMenuTile = idx },
+                        onCycleTileBackup = onCycleTileBackup,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    )
+                }
             }
         }
     }
@@ -247,41 +254,70 @@ fun MultiviewTile(
     onClick: () -> Unit,
     onFocusGained: () -> Unit,
     onOpenMenu: () -> Unit,
+    onCycleTileBackup: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val appContext = remember(context) { context.applicationContext }
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
-    var isPlayerError by remember { mutableStateOf(false) }
-    var errorDetail by remember { mutableStateOf("") }
+    val currentOnFocusGained by rememberUpdatedState(onFocusGained)
+    val currentOnCycleTileBackup by rememberUpdatedState(onCycleTileBackup)
+
+    // Key ExoPlayer strictly on the actual stream URL so focus/audio changes never rebuild it
+    val activeStreamUrl = if (shouldPlayVideo) {
+        channel?.streamUrl?.takeIf { it.isNotBlank() }
+    } else {
+        null
+    }
 
     // When focus lands on this screen via D-pad navigation, switch sound to this screen
     LaunchedEffect(isFocused) {
         if (isFocused) {
-            onFocusGained()
+            currentOnFocusGained()
         }
     }
 
-    val exoPlayer = remember(context, channel?.streamUrl, shouldPlayVideo) {
-        if (!shouldPlayVideo || channel == null || channel.streamUrl.isBlank()) {
+    val exoPlayer = remember(activeStreamUrl) {
+        if (activeStreamUrl == null) {
             null
         } else {
             try {
-                val renderersFactory = DefaultRenderersFactory(context).apply {
+                val renderersFactory = DefaultRenderersFactory(appContext).apply {
                     setEnableDecoderFallback(true)
                 }
+
+                val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+                    .setUserAgent("Mozilla/5.0 (Linux; Android 14; Fire TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    .setAllowCrossProtocolRedirects(true)
+                    .setConnectTimeoutMs(10_000)
+                    .setReadTimeoutMs(10_000)
+
+                val dataSourceFactory = DefaultDataSource.Factory(appContext, httpDataSourceFactory)
+                val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
                 val loadControl = DefaultLoadControl.Builder()
                     .setBufferDurationsMs(4000, 15000, 1500, 2500)
                     .setBackBuffer(0, false)
                     .build()
 
-                ExoPlayer.Builder(context, renderersFactory)
+                ExoPlayer.Builder(appContext, renderersFactory)
+                    .setMediaSourceFactory(mediaSourceFactory)
                     .setLoadControl(loadControl)
                     .build().apply {
-                        val mediaItem = MediaItem.fromUri(channel.streamUrl)
+                        val mediaItem = MediaItem.fromUri(activeStreamUrl)
                         setMediaItem(mediaItem)
                         volume = if (isSoundActive) 1.0f else 0.0f
+                        trackSelectionParameters = trackSelectionParameters
+                            .buildUpon()
+                            .apply {
+                                if (isSoundActive) {
+                                    clearVideoSizeConstraints()
+                                } else {
+                                    setMaxVideoSize(1280, 720)
+                                }
+                            }
+                            .build()
                         repeatMode = Player.REPEAT_MODE_OFF
                         prepare()
                         playWhenReady = true
@@ -292,15 +328,64 @@ fun MultiviewTile(
         }
     }
 
+    var playbackState by remember(exoPlayer) {
+        mutableIntStateOf(if (exoPlayer != null) Player.STATE_BUFFERING else Player.STATE_IDLE)
+    }
+    var isReconnecting by remember(exoPlayer) { mutableStateOf(false) }
+    var retryCount by remember(exoPlayer) { mutableIntStateOf(0) }
+    var errorEventNonce by remember(exoPlayer) { mutableIntStateOf(0) }
+    var hasExhaustedRetries by remember(exoPlayer) { mutableStateOf(false) }
+    var isPlayerError by remember(exoPlayer) { mutableStateOf(false) }
+    var errorDetail by remember(exoPlayer) { mutableStateOf("") }
+
+    fun attemptRecoverOrCycleBackup(player: ExoPlayer) {
+        if (hasExhaustedRetries) return
+        if (retryCount < 2) {
+            retryCount += 1
+            isReconnecting = true
+            isPlayerError = false
+            try {
+                // Reset stalled BUFFERING state to IDLE so prepare() genuinely reconnects,
+                // then seekToDefaultPosition() to re-sync to live edge.
+                player.stop()
+                if (player.mediaItemCount == 0 && activeStreamUrl != null) {
+                    player.setMediaItem(MediaItem.fromUri(activeStreamUrl))
+                }
+                player.prepare()
+                player.seekToDefaultPosition()
+                player.playWhenReady = true
+            } catch (e: Throwable) {
+                isPlayerError = true
+                errorDetail = e.localizedMessage ?: "Reconnect failed"
+            }
+        } else {
+            hasExhaustedRetries = true
+            isReconnecting = false
+            isPlayerError = true
+            currentOnCycleTileBackup(tileIndex)
+        }
+    }
+
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 isPlayerError = true
                 errorDetail = error.errorCodeName
+                playbackState = Player.STATE_IDLE
+                if (!hasExhaustedRetries) {
+                    isReconnecting = true
+                    errorEventNonce += 1
+                }
             }
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY) {
+
+            override fun onPlaybackStateChanged(state: Int) {
+                playbackState = state
+                if (state == Player.STATE_READY) {
                     isPlayerError = false
+                    errorDetail = ""
+                    isReconnecting = false
+                    retryCount = 0
+                    hasExhaustedRetries = false
                 }
             }
         }
@@ -317,9 +402,42 @@ fun MultiviewTile(
         }
     }
 
+    // Stall watchdog: if stuck in STATE_BUFFERING for > 8s, retry & re-sync to live (up to 2 retries, then cycle backup)
+    LaunchedEffect(exoPlayer, playbackState, retryCount, hasExhaustedRetries) {
+        val player = exoPlayer ?: return@LaunchedEffect
+        if (playbackState == Player.STATE_BUFFERING && !hasExhaustedRetries) {
+            delay(8_000L)
+            if (player.playbackState == Player.STATE_BUFFERING && !hasExhaustedRetries) {
+                attemptRecoverOrCycleBackup(player)
+            }
+        }
+    }
+
+    // Error recovery handler: onPlayerError triggers reconnect (up to 2 retries, then cycle backup)
+    LaunchedEffect(exoPlayer, errorEventNonce) {
+        val player = exoPlayer ?: return@LaunchedEffect
+        if (errorEventNonce == 0 || hasExhaustedRetries) return@LaunchedEffect
+        if (retryCount < 2) {
+            delay(1_000L)
+        }
+        attemptRecoverOrCycleBackup(player)
+    }
+
+    // Update volume and 720p decoder cap without rebuilding ExoPlayer when active-sound tile changes
     LaunchedEffect(exoPlayer, isSoundActive) {
+        val player = exoPlayer ?: return@LaunchedEffect
         try {
-            exoPlayer?.volume = if (isSoundActive) 1.0f else 0.0f
+            player.volume = if (isSoundActive) 1.0f else 0.0f
+            player.trackSelectionParameters = player.trackSelectionParameters
+                .buildUpon()
+                .apply {
+                    if (isSoundActive) {
+                        clearVideoSizeConstraints()
+                    } else {
+                        setMaxVideoSize(1280, 720)
+                    }
+                }
+                .build()
         } catch (e: Throwable) {}
     }
 
@@ -363,6 +481,11 @@ fun MultiviewTile(
                             if (view.player != exoPlayer) {
                                 view.player = exoPlayer
                             }
+                        } catch (e: Throwable) {}
+                    },
+                    onRelease = { view ->
+                        try {
+                            view.player = null
                         } catch (e: Throwable) {}
                     },
                     modifier = Modifier.fillMaxSize()
@@ -424,6 +547,55 @@ fun MultiviewTile(
                         color = TvTextMuted,
                         fontSize = 12.sp
                     )
+                }
+            }
+        }
+
+        // Reconnecting overlay while retrying so the tile never shows a frozen frame
+        if (activeStreamUrl != null && (isReconnecting || (hasExhaustedRetries && isPlayerError))) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.65f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(TvDarkSurface.copy(alpha = 0.92f))
+                        .border(1.dp, TvOrangeFocus.copy(alpha = 0.8f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (isReconnecting) {
+                        CircularProgressIndicator(
+                            color = TvOrangeFocus,
+                            strokeWidth = 2.5.dp,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Reconnecting...",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Stream error",
+                            tint = TvOrangeFocus,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = if (errorDetail.isNotBlank()) "Stream unavailable ($errorDetail)" else "Stream unavailable • Press OK",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
